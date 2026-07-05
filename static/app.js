@@ -41,6 +41,38 @@ function localDate(value) {
   return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
 }
 
+function captureLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) {
+      return resolve({ status: "UNAVAILABLE" });
+    }
+    navigator.geolocation.getCurrentPosition(
+      position => resolve({
+        status: "CAPTURED",
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      }),
+      error => resolve({
+        status: error.code === error.PERMISSION_DENIED
+          ? "DENIED"
+          : error.code === error.TIMEOUT ? "TIMEOUT" : "UNAVAILABLE"
+      }),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+}
+
+function locationSummary(locations = []) {
+  const captured = locations.find(location => location.status === "CAPTURED");
+  if (captured) {
+    const url = `https://www.google.com/maps?q=${captured.latitude},${captured.longitude}`;
+    return `<a href="${url}" target="_blank" rel="noopener">Ver localização</a><small>Precisão aproximada: ${Math.round(captured.accuracy)} m</small>`;
+  }
+  const status = locations[0]?.status;
+  return `<small>${status === "DENIED" ? "Localização não autorizada" : status === "TIMEOUT" ? "Localização não obtida a tempo" : "Localização indisponível"}</small>`;
+}
+
 async function boot() {
   const data = await api("/api/me");
   if (!data.user) return show("#loginView");
@@ -122,7 +154,7 @@ async function loadEmployeeHistory() {
     $("#pendingOvertimeAlert").innerHTML = pending ? `<strong>${pending} hora(s) extra(s) aguardando justificativa.</strong> Use o botão “Justificar” na data correspondente.` : "";
     $("#employeeHistoryBody").innerHTML = employeeHistory.length ? employeeHistory.map(r => `<tr>
       <td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" · ") : "—"}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) : ""}</td>
       <td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span></td>
       <td>${r.overtime_minutes ? `<strong>+${minutes(r.overtime_minutes)}</strong>${r.overtime_reason ? `<small>${overtimeStatus[r.overtime_status] || "Justificativa enviada"}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment]}` : ""}</small>` : `<button class="text-button" onclick="justifyHistoricalOvertime('${r.date}')">Justificar</button>`}` : "—"}</td>
@@ -146,15 +178,19 @@ setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("pt-
 
 $("#punchButton").addEventListener("click", async () => {
   try {
-    await api("/api/punch", { method: "POST", body: "{}" });
+    const location = await captureLocation();
+    await api("/api/punch", { method: "POST", body: JSON.stringify({ location }) });
     toast("Ponto registrado com sucesso.");
     await loadEmployee();
+    await loadEmployeeHistory();
   } catch (error) {
     if (error.data?.confirmation_required) {
       confirmModal("Confirmar nova marcação", error.message, async () => {
-        await api("/api/punch", { method: "POST", body: JSON.stringify({ confirm_close: true }) });
+        const location = await captureLocation();
+        await api("/api/punch", { method: "POST", body: JSON.stringify({ confirm_close: true, location }) });
         toast("Nova marcação confirmada.");
         await loadEmployee();
+        await loadEmployeeHistory();
       });
     } else toast(error.message, true);
   }
@@ -358,7 +394,7 @@ async function loadManager() {
     ].map(([name, value]) => `<div class="stat"><span>${name}</span><strong>${value}</strong></div>`).join("");
     $("#reportBody").innerHTML = data.report.map(r => `<tr>
       <td><strong>${r.name}</strong><small>${r.registration}</small></td><td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" · ") : "—"}</td><td>${minutes(r.worked_minutes)}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) : ""}</td><td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span>${r.overtime_minutes ? `<small>+${minutes(r.overtime_minutes)}</small>` : ""}</td>
       <td><small>${h(r.overtime_reason || "")}${r.overtime_status ? `<br><b>${overtimeStatus[r.overtime_status] || ""}</b>` : ""}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment] || ""}` : ""}${r.overtime_review_note ? `<br>${h(r.overtime_review_note)}` : ""}${r.day_note ? `<br>${h(r.day_note)}` : ""}</small></td>
       <td>${r.overtime_minutes ? (r.overtime_reason ? `<button class="text-button" onclick="reviewOvertime(${r.user_id},'${r.date}')">Analisar justificativa</button>` : `<small>Aguardando justificativa</small>`) : ""}<button class="text-button" onclick="dayNote(${r.user_id},'${r.date}')">Ocorrência</button><button class="text-button" onclick="managerCorrection(${r.user_id},'${r.date}')">Corrigir</button></td>

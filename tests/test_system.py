@@ -70,7 +70,7 @@ class SystemTest(unittest.TestCase):
                 "name": f"Funcionário Teste {suffix}",
                 "registration": registration,
                 "password": "Teste@123",
-                "admission_date": server.now_local().date().isoformat(),
+                "admission_date": (server.now_local().date() - timedelta(days=30)).isoformat(),
                 "position": "Analista",
             },
         )

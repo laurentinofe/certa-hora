@@ -167,6 +167,17 @@ def init_db():
             con.execute("ALTER TABLE users ADD COLUMN admission_date TEXT")
         if "position" not in user_columns:
             con.execute("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''")
+        punch_columns = {row["name"] for row in con.execute("PRAGMA table_info(punches)")}
+        if "latitude" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN latitude REAL")
+        if "longitude" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN longitude REAL")
+        if "location_accuracy" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN location_accuracy REAL")
+        if "location_status" not in punch_columns:
+            con.execute(
+                "ALTER TABLE punches ADD COLUMN location_status TEXT NOT NULL DEFAULT 'NOT_COLLECTED'"
+            )
         con.execute(
             """INSERT OR IGNORE INTO company_settings(
                id,company_name,company_document,work_start,lunch_start,lunch_end,
@@ -667,8 +678,17 @@ class Handler(BaseHTTPRequestHandler):
                     sql += " AND id=?"
                     params.append(selected)
                 report = build_report(con, rows_as_dict(con.execute(sql, params)), date_from, date_to)
-            headers = ["Funcionário", "Matrícula", "Data", "Marcações", "Minutos trabalhados", "Hora extra", "Situação", "Justificativa", "Ocorrência"]
-            data = [[r["name"], r["registration"], r["date"], " | ".join(r["times"]), r["worked_minutes"], r["overtime_minutes"], r["state"], r.get("overtime_reason", ""), r.get("day_note", "")] for r in report]
+            headers = ["Funcionário", "Matrícula", "Data", "Marcações", "Localizações", "Minutos trabalhados", "Hora extra", "Situação", "Justificativa", "Ocorrência"]
+            data = [[
+                r["name"], r["registration"], r["date"], " | ".join(r["times"]),
+                " | ".join(
+                    f'{location["latitude"]:.6f},{location["longitude"]:.6f} (±{location["accuracy"]:.0f}m)'
+                    if location["status"] == "CAPTURED" else location["status"]
+                    for location in r["locations"]
+                ),
+                r["worked_minutes"], r["overtime_minutes"], r["state"],
+                r.get("overtime_reason", ""), r.get("day_note", "")
+            ] for r in report]
             content = xlsx_bytes(headers, data)
             self.send_response(200)
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -759,6 +779,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             stamp = now_local()
             today = stamp.date().isoformat()
+            location = payload.get("location") or {}
+            location_status = str(location.get("status", "UNAVAILABLE")).upper()
+            if location_status not in {"CAPTURED", "DENIED", "UNAVAILABLE", "TIMEOUT"}:
+                location_status = "UNAVAILABLE"
+            latitude = longitude = accuracy = None
+            if location_status == "CAPTURED":
+                try:
+                    latitude = float(location["latitude"])
+                    longitude = float(location["longitude"])
+                    accuracy = float(location["accuracy"])
+                    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                        raise ValueError
+                    if accuracy < 0:
+                        raise ValueError
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError("Dados de localização inválidos.")
             with db() as con:
                 punches = effective_punches(con, user["id"], today, today)
                 if punches:
@@ -767,8 +803,20 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json(409, {"confirmation_required": True, "seconds": max(0, int(seconds)), "error": "Existe uma marcação feita há menos de 30 segundos. Deseja registrar novamente?"})
                 punch_type = PUNCH_TYPES[len(punches) % len(PUNCH_TYPES)]
                 cursor = con.execute(
-                    "INSERT INTO punches(user_id,punched_at,punch_type,created_at) VALUES(?,?,?,?)",
-                    (user["id"], stamp.isoformat(), punch_type, stamp.isoformat()),
+                    """INSERT INTO punches(
+                       user_id,punched_at,punch_type,created_at,latitude,longitude,
+                       location_accuracy,location_status)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        user["id"],
+                        stamp.isoformat(),
+                        punch_type,
+                        stamp.isoformat(),
+                        latitude,
+                        longitude,
+                        accuracy,
+                        location_status,
+                    ),
                 )
                 con.execute(
                     "INSERT INTO audit_log(actor_id,action,entity,entity_id,details,created_at) VALUES(?,?,?,?,?,?)",
@@ -1150,11 +1198,18 @@ class Handler(BaseHTTPRequestHandler):
                     "INCOMPLETE": regular[:-1],
                 }
                 employee = con.execute(
-                    "SELECT id,created_at FROM users WHERE id=? AND role='EMPLOYEE' AND active=1",
+                    "SELECT id,created_at,admission_date FROM users WHERE id=? AND role='EMPLOYEE' AND active=1",
                     (user_id,),
                 ).fetchone()
                 if not employee:
                     raise ValueError("Funcionário não encontrado ou inativo.")
+                admission_date = date.fromisoformat(
+                    employee["admission_date"] or employee["created_at"][:10]
+                )
+                if work_date < admission_date:
+                    raise ValueError(
+                        "A demonstração não pode utilizar data anterior à admissão."
+                    )
                 existing = effective_punches(con, user_id, date_text, date_text)
                 if existing:
                     raise ValueError("Esse funcionário já possui marcações nessa data. Escolha outro dia.")
@@ -1313,11 +1368,8 @@ def build_report(con, employees, date_from, date_to):
             key = current.isoformat()
             items = by_day.get(key, [])
             is_registered = current >= registration_date
-            has_pre_registration_demo = any(
-                item.get("source") == "DEMO" for item in items
-            )
             if (
-                (is_registered or has_pre_registration_demo)
+                is_registered
                 and (current.weekday() < 5 or items)
                 and current <= now_local().date()
             ):
@@ -1337,6 +1389,15 @@ def build_report(con, employees, date_from, date_to):
                         "registration": employee["registration"],
                         "date": key,
                         "times": [parse_iso(p["punched_at"]).strftime("%H:%M:%S") for p in items],
+                        "locations": [
+                            {
+                                "status": p.get("location_status", "NOT_COLLECTED"),
+                                "latitude": p.get("latitude"),
+                                "longitude": p.get("longitude"),
+                                "accuracy": p.get("location_accuracy"),
+                            }
+                            for p in items
+                        ],
                         **summary,
                         "overtime_reason": justification["reason"] if justification else "",
                         "overtime_status": justification["status"] if justification else "",
