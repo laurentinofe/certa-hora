@@ -21,7 +21,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "ponto.db"
-HOST = os.environ.get("HOST", "127.0.0.1")
+# Em hospedagens, o servidor precisa aceitar conexões externas. O mesmo host
+# continua acessível localmente por http://127.0.0.1:8000.
+HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8000"))
 WORKDAY_MINUTES = 8 * 60 + 30
 TOLERANCE_MINUTES = 10

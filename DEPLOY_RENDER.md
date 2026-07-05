@@ -10,7 +10,7 @@ O arquivo `render.yaml` define:
 - Plano: Free
 - Build: `pip install -r requirements.txt`
 - Start: `python server.py`
-- Host: `0.0.0.0`
+- Host: `0.0.0.0` definido diretamente pelo servidor
 - Health check: `/api/me`
 
 ## Observação sobre os dados
