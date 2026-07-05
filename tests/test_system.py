@@ -1,0 +1,189 @@
+import base64
+import http.cookiejar
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from datetime import timedelta
+from pathlib import Path
+
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
+import server
+
+
+class SystemTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.database = Path(tempfile.gettempdir()) / f"ponto_tests_{uuid.uuid4().hex}.db"
+        server.DB_PATH = cls.database
+        server.SESSIONS.clear()
+        server.init_db()
+        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.thread.join(timeout=3)
+
+    def client(self):
+        return urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+        )
+
+    def request(self, client, path, payload=None):
+        if payload is None:
+            return json.loads(client.open(self.base + path).read())
+        request = urllib.request.Request(
+            self.base + path,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        return json.loads(client.open(request).read())
+
+    def login(self, registration, password):
+        client = self.client()
+        self.request(
+            client,
+            "/api/login",
+            {"registration": registration, "password": password},
+        )
+        return client
+
+    def create_employee(self, manager, suffix):
+        registration = f"test-{suffix}-{uuid.uuid4().hex[:6]}"
+        created = self.request(
+            manager,
+            "/api/manager/users",
+            {
+                "name": f"Funcionário Teste {suffix}",
+                "registration": registration,
+                "password": "Teste@123",
+                "admission_date": server.now_local().date().isoformat(),
+                "position": "Analista",
+            },
+        )
+        return created["user"], registration
+
+    def test_10_authentication_and_permissions(self):
+        employee = self.login("1001", "Teste@123")
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            self.request(employee, "/api/manager/users")
+        self.assertEqual(denied.exception.code, 403)
+        dashboard = self.request(employee, "/api/dashboard")
+        self.assertEqual(dashboard["next_type"], "ENTRADA")
+
+    def test_20_configurable_schedule_and_demo_calculation(self):
+        manager = self.login("admin", "Admin@123")
+        response = self.request(
+            manager,
+            "/api/manager/settings",
+            {
+                "company_name": "Empresa Acadêmica",
+                "company_document": "00.000.000/0001-00",
+                "work_start": "08:00",
+                "lunch_start": "12:00",
+                "lunch_end": "13:30",
+                "work_end": "18:00",
+                "tolerance_minutes": 10,
+            },
+        )
+        self.assertEqual(response["workday_minutes"], 510)
+        user, _ = self.create_employee(manager, "jornada")
+        demo = self.request(
+            manager,
+            "/api/manager/demo-day",
+            {
+                "user_id": user["id"],
+                "work_date": server.now_local().date().isoformat(),
+                "scenario": "OVERTIME",
+            },
+        )
+        self.assertEqual(demo["summary"]["overtime_minutes"], 60)
+
+    def test_30_overtime_reason_review_preserves_minutes(self):
+        manager = self.login("admin", "Admin@123")
+        user, registration = self.create_employee(manager, "extra")
+        work_date = (server.now_local().date() - timedelta(days=2)).isoformat()
+        self.request(
+            manager,
+            "/api/manager/demo-day",
+            {"user_id": user["id"], "work_date": work_date, "scenario": "OVERTIME"},
+        )
+        employee = self.login(registration, "Teste@123")
+        self.request(
+            employee,
+            "/api/overtime-justification",
+            {"work_date": work_date, "reason": "Atendimento emergencial"},
+        )
+        self.request(
+            manager,
+            "/api/manager/overtime-review",
+            {
+                "user_id": user["id"],
+                "work_date": work_date,
+                "status": "REJECTED",
+                "treatment": "HR_REVIEW",
+                "note": "Motivo contestado, horas preservadas",
+            },
+        )
+        month = work_date[:7]
+        history = self.request(employee, f"/api/employee/history?month={month}")
+        row = next(item for item in history["history"] if item["date"] == work_date)
+        self.assertEqual(row["overtime_minutes"], 60)
+        self.assertEqual(row["overtime_status"], "REJECTED")
+
+    def test_40_password_change_invalidates_sessions(self):
+        manager = self.login("admin", "Admin@123")
+        _, registration = self.create_employee(manager, "senha")
+        first = self.login(registration, "Teste@123")
+        second = self.login(registration, "Teste@123")
+        self.request(
+            first,
+            "/api/change-password",
+            {"current_password": "Teste@123", "new_password": "NovaSenha@1"},
+        )
+        for client in (first, second):
+            with self.assertRaises(urllib.error.HTTPError) as denied:
+                self.request(client, "/api/dashboard")
+            self.assertEqual(denied.exception.code, 401)
+        self.assertIsNotNone(self.request(self.login(registration, "NovaSenha@1"), "/api/dashboard"))
+
+    def test_50_audit_filters(self):
+        manager = self.login("admin", "Admin@123")
+        query = urllib.parse.urlencode({"action": "UPDATE_SETTINGS"})
+        audit = self.request(manager, f"/api/manager/audit?{query}")
+        self.assertTrue(audit["entries"])
+        self.assertTrue(all(item["action"] == "UPDATE_SETTINGS" for item in audit["entries"]))
+
+    def test_90_backup_and_restore(self):
+        manager = self.login("admin", "Admin@123")
+        backup = manager.open(self.base + "/api/manager/backup").read()
+        self.assertTrue(backup.startswith(b"SQLite format 3\x00"))
+        _, registration = self.create_employee(manager, "apos-backup")
+        restored = self.request(
+            manager,
+            "/api/manager/restore",
+            {"backup_base64": base64.b64encode(backup).decode()},
+        )
+        self.assertIn("restaurado", restored["message"].lower())
+        with self.assertRaises(urllib.error.HTTPError):
+            self.login(registration, "Teste@123")
+        manager = self.login("admin", "Admin@123")
+        audit = self.request(manager, "/api/manager/audit")
+        self.assertTrue(any(item["action"] == "RESTORE_BACKUP" for item in audit["entries"]))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

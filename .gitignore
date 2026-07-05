@@ -1,0 +1,26 @@
+# Banco e arquivos auxiliares do SQLite
+ponto.db
+ponto.db-shm
+ponto.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Ambientes e editores
+.venv/
+venv/
+.vscode/
+.idea/
+
+# Sistema operacional e arquivos temporários
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+.backup-*
+.restore-*
