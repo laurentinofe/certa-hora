@@ -115,7 +115,7 @@ class SystemTest(unittest.TestCase):
     def test_30_overtime_reason_review_preserves_minutes(self):
         manager = self.login("admin", "Admin@123")
         user, registration = self.create_employee(manager, "extra")
-        work_date = (server.now_local().date() - timedelta(days=2)).isoformat()
+        work_date = server.now_local().date().isoformat()
         self.request(
             manager,
             "/api/manager/demo-day",

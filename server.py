@@ -1206,9 +1206,10 @@ class Handler(BaseHTTPRequestHandler):
                 admission_date = date.fromisoformat(
                     employee["admission_date"] or employee["created_at"][:10]
                 )
-                if work_date < admission_date:
+                account_created_date = parse_iso(employee["created_at"]).date()
+                if work_date < max(admission_date, account_created_date):
                     raise ValueError(
-                        "A demonstração não pode utilizar data anterior à admissão."
+                        "A demonstração não pode utilizar data anterior à admissão ou à criação da conta."
                     )
                 existing = effective_punches(con, user_id, date_text, date_text)
                 if existing:
@@ -1354,11 +1355,17 @@ def build_report(con, employees, date_from, date_to):
         raise ValueError("Período inválido ou superior a 366 dias.")
     result = []
     for employee in employees:
-        registration_date = start
-        if employee.get("admission_date"):
-            registration_date = date.fromisoformat(employee["admission_date"])
-        elif employee.get("created_at"):
-            registration_date = parse_iso(employee["created_at"]).date()
+        account_created_date = (
+            parse_iso(employee["created_at"]).date()
+            if employee.get("created_at")
+            else start
+        )
+        admission_date = (
+            date.fromisoformat(employee["admission_date"])
+            if employee.get("admission_date")
+            else account_created_date
+        )
+        registration_date = max(account_created_date, admission_date)
         punches = effective_punches(con, employee["id"], date_from, date_to)
         by_day = {}
         for punch in punches:
