@@ -17,6 +17,7 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,10 +32,11 @@ TOLERANCE_MINUTES = 10
 PUNCH_TYPES = ["ENTRADA", "SAIDA_ALMOCO", "RETORNO_ALMOCO", "SAIDA"]
 SESSIONS = {}
 SESSION_LOCK = threading.Lock()
+APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Sao_Paulo"))
 
 
 def now_local():
-    return datetime.now().astimezone()
+    return datetime.now(APP_TIMEZONE)
 
 
 def db():
