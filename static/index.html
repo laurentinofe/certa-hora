@@ -7,7 +7,14 @@
     <link rel="stylesheet" href="/styles.css?v=20260707-3">
 </head>
 <body>
+  <!--
+    Estrutura principal da aplicação.
+    O sistema é uma página única: o JavaScript alterna entre login,
+    área do funcionário e painel do gestor sem carregar outras páginas.
+  -->
   <main id="app" class="app-shell">
+    <!-- Tela de autenticação: recebe matrícula e senha e direciona o usuário
+         para a área correta conforme o perfil retornado pelo backend. -->
     <section class="auth-card" id="loginView">
       <div class="brand"><span class="brand-mark">CH</span><div><strong>Certa Hora</strong><small>Controle de jornada</small></div></div>
       <div class="auth-copy">
@@ -23,11 +30,15 @@
       <details class="demo"><summary>Credenciais de demonstração</summary><p>Funcionário: <b>1001</b> / Teste@123<br>Gestor: <b>admin</b> / Admin@123</p></details>
     </section>
 
+    <!-- Área do funcionário: reúne registro de ponto, resumo do dia,
+         linha do tempo das marcações, solicitação de correção e espelho mensal. -->
     <section id="employeeView" class="hidden">
       <header class="topbar"><div class="brand"><span class="brand-mark">CH</span><div><strong>Certa Hora</strong><small>Área do funcionário</small></div></div><div class="user-actions"><span id="employeeName"></span><button id="changePasswordButton" class="ghost">Alterar senha</button><button class="ghost logout">Sair</button></div></header>
       <div class="content">
         <div class="welcome-row"><div><p class="eyebrow">Jornada de hoje</p><h1 id="greeting">Olá</h1><p id="employeeSchedule" class="muted">08:00–12:00 · 13:30–18:00</p></div><div class="clock"><strong id="clock">--:--:--</strong><span id="todayLabel"></span></div></div>
         <div class="employee-grid">
+          <!-- Cartão principal para registrar a próxima marcação prevista.
+               A localização é solicitada no clique, não durante a navegação. -->
           <article class="card punch-card">
             <p class="eyebrow">Próxima marcação</p><h2 id="nextPunch">Entrada</h2>
             <button id="punchButton" class="punch-button"><span>Registrar ponto</span><small>Horário fornecido pelo servidor</small></button>
@@ -39,6 +50,8 @@
             <div><span>Situação</span><strong id="dayState" class="status">Aguardando</strong></div>
           </article>
         </div>
+        <!-- Cartão exibido somente quando o sistema identifica hora extra.
+             A justificativa fica disponível ao gestor para análise administrativa. -->
         <article id="overtimeCard" class="card overtime hidden">
           <div><p class="eyebrow">Hora extra detectada</p><h2 id="overtimeValue"></h2><p>Conte brevemente o motivo. A justificativa será enviada ao gestor.</p></div>
           <form id="overtimeForm"><textarea id="overtimeReason" required minlength="5" placeholder="Ex.: atendimento emergencial ao cliente"></textarea><button class="primary">Enviar justificativa</button></form>
@@ -59,6 +72,8 @@
             <div id="correctionList" class="compact-list"></div>
           </article>
         </div>
+        <!-- Espelho mensal do funcionário, usado para consulta do próprio histórico.
+             Mostra marcações reais, ajustes aprovados, situação e ocorrências. -->
         <article class="card table-card employee-history">
           <div class="card-head history-head">
             <div><p class="eyebrow">Meu histórico</p><h2>Espelho mensal</h2></div>
@@ -73,10 +88,14 @@
       </div>
     </section>
 
+    <!-- Painel do gestor: concentra configurações, cadastro de funcionários,
+         filtros, relatórios, auditoria, backup e ações de correção. -->
     <section id="managerView" class="hidden">
       <header class="topbar"><div class="brand"><span class="brand-mark">CH</span><div><strong>Certa Hora</strong><small>Painel do gestor</small></div></div><div class="user-actions"><span id="managerName"></span><button class="ghost logout">Sair</button></div></header>
       <div class="content">
         <div class="welcome-row"><div><p class="eyebrow">Visão gerencial</p><h1>Registros de jornada</h1><p class="muted">Acompanhe pendências, horas extras e ocorrências.</p></div></div>
+        <!-- Configurações globais que alimentam os cálculos de jornada:
+             horários, tolerância e regra de cerca geográfica. -->
         <article class="card settings-panel">
           <div><p class="eyebrow">Configurações</p><h2>Empresa e jornada</h2><p class="muted">Esses horários alimentam os cálculos diários e as simulações.</p></div>
           <form id="settingsForm" class="settings-form">
@@ -95,6 +114,8 @@
             <button class="primary" type="submit">Salvar configurações</button>
           </form>
         </article>
+        <!-- Cadastro criado pelo gestor. A matrícula gerada aqui será usada
+             pelo funcionário para acessar o sistema. -->
         <article class="card employee-register">
           <div>
             <p class="eyebrow">Equipe</p>
@@ -110,6 +131,8 @@
             <button class="primary" type="submit">Cadastrar funcionário</button>
           </form>
         </article>
+        <!-- Lista de funcionários cadastrados, com ações administrativas
+             para edição, redefinição de senha e ativação/desativação. -->
         <article class="card table-card employee-management">
           <div class="card-head"><div><p class="eyebrow">Equipe</p><h2>Gerenciar funcionários</h2></div></div>
           <div class="table-wrap"><table class="employee-table">
@@ -117,6 +140,8 @@
             <tbody id="employeeBody"></tbody>
           </table></div>
         </article>
+        <!-- Recurso de demonstração acadêmica para gerar cenários controlados
+             de jornada regular, hora extra ou jornada incompleta. -->
         <article class="card demo-panel">
           <div>
             <p class="eyebrow">Ambiente acadêmico</p>
@@ -134,6 +159,7 @@
             <button class="secondary" type="submit">Gerar demonstração</button>
           </form>
         </article>
+        <!-- Filtros do relatório diário e botão de exportação para Excel. -->
         <article class="card filters">
           <label>Funcionário<select id="filterUser"><option value="">Todos</option></select></label>
           <label>Data inicial<input id="filterFrom" type="date"></label>
@@ -142,8 +168,14 @@
           <button id="exportButton" class="secondary">Exportar Excel</button>
         </article>
         <div id="managerStats" class="stats"></div>
+        <!-- Espelho diário gerencial: principal relatório de acompanhamento,
+             exibindo marcações, totais, situação, localização e ações. -->
         <article class="card table-card"><div class="card-head"><div><p class="eyebrow">Apuração</p><h2>Espelho diário</h2></div></div><div class="table-wrap"><table><thead><tr><th>Funcionário</th><th>Data</th><th>Marcações</th><th>Trabalhado</th><th>Situação</th><th>Justificativa/ocorrência</th><th>Ações</th></tr></thead><tbody id="reportBody"></tbody></table></div></article>
+        <!-- Auditoria das solicitações de correção feitas por funcionários
+             ou lançadas pelo gestor. -->
         <article class="card table-card"><div class="card-head"><div><p class="eyebrow">Auditoria</p><h2>Solicitações de correção</h2></div></div><div class="table-wrap"><table><thead><tr><th>Funcionário</th><th>Solicitação</th><th>Motivo</th><th>Status</th><th>Ações</th></tr></thead><tbody id="correctionsBody"></tbody></table></div></article>
+        <!-- Log de auditoria geral para rastrear alterações relevantes
+             feitas no sistema. -->
         <article class="card table-card">
           <div class="card-head"><div><p class="eyebrow">Rastreabilidade</p><h2>Log de auditoria</h2></div></div>
           <div class="audit-filters">
@@ -155,6 +187,8 @@
           </div>
           <div class="table-wrap"><table><thead><tr><th>Data/hora</th><th>Responsável</th><th>Ação</th><th>Entidade</th><th>Detalhes</th></tr></thead><tbody id="auditBody"></tbody></table></div>
         </article>
+        <!-- Backup e restauração do banco SQLite. Útil para demonstração,
+             transporte dos dados e recuperação em caso de problema. -->
         <article class="card backup-panel">
           <div><p class="eyebrow">Continuidade</p><h2>Backup do banco de dados</h2><p class="muted">Exporte uma cópia completa ou restaure um arquivo gerado pelo sistema.</p></div>
           <div class="backup-actions"><button id="backupButton" class="primary">Baixar backup</button><label class="file-button">Selecionar backup<input id="restoreFile" type="file" accept=".db,application/vnd.sqlite3"></label><button id="restoreButton" class="secondary">Restaurar</button></div>
@@ -162,6 +196,8 @@
       </div>
     </section>
   </main>
+  <!-- Modal e toast são componentes reaproveitados em várias ações:
+       confirmação de ponto próximo, justificativa da cerca, correções e alertas. -->
   <div id="modal" class="modal hidden"><div class="modal-box"><h2 id="modalTitle"></h2><div id="modalContent"></div><div class="modal-actions"><button id="modalCancel" class="ghost">Cancelar</button><button id="modalConfirm" class="primary">Confirmar</button></div></div></div>
   <div id="toast" class="toast hidden"></div>
     <script src="/app.js?v=20260707-3"></script>

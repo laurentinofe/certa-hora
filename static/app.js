@@ -1,5 +1,11 @@
 ﻿const $ = (selector) => document.querySelector(selector);
 const h = (value) => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
+// ============================================================
+// Utilitários gerais da interface
+// ============================================================
+// As constantes abaixo centralizam textos e pequenas funções usadas
+// em várias telas. Isso evita repetir rótulos e facilita futuras mudanças
+// de nomenclatura ou apresentação.
 const labels = { ENTRADA: "Entrada", SAIDA_ALMOCO: "Saída para almoço", RETORNO_ALMOCO: "Retorno do almoço", SAIDA: "Saída" };
 const states = { SEM_REGISTROS: "Sem registros", INCOMPLETO: "Jornada incompleta", HORA_EXTRA: "Hora extra", CARGA_INFERIOR: "Carga inferior", REGULAR: "Regular" };
 const overtimeStatus = { PENDING: "Aguardando análise", APPROVED: "Justificativa validada", REJECTED: "Justificativa contestada" };
@@ -9,6 +15,12 @@ let employeeData = null;
 let employeeHistory = [];
 let managerUsers = [];
 
+// ============================================================
+// Comunicação com o backend
+// ============================================================
+// Todas as chamadas ao servidor passam por esta função. Ela padroniza
+// o envio em JSON e transforma respostas de erro em mensagens amigáveis
+// para a tela, facilitando o tratamento nas rotinas de login, ponto e gestão.
 async function api(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
   if (!response.ok) {
@@ -47,6 +59,12 @@ function localInputToSaoPauloIso(value) {
   return `${withSeconds}-03:00`;
 }
 
+// ============================================================
+// Captura de localização e exibição da cerca geográfica
+// ============================================================
+// A localização é solicitada apenas no momento da marcação do ponto.
+// Caso o usuário negue, demore ou o aparelho não ofereça geolocalização,
+// o sistema registra essa condição para auditoria, sem travar a aplicação.
 function captureLocation() {
   return new Promise(resolve => {
     if (!navigator.geolocation) {
@@ -81,6 +99,9 @@ function locationSummary(locations = []) {
   return `<small>${status === "DENIED" ? "Localização não autorizada" : status === "TIMEOUT" ? "Localização não obtida a tempo" : "Localização indisponível"}</small>`;
 }
 
+// Mostra para funcionário e gestor o resultado da validação da cerca:
+// dentro da área permitida, fora da área, cerca flexível no horário de almoço
+// ou localização indisponível.
 function geofenceSummary(locations = []) {
   const geofence = locations.find(location => location.geofence_status && location.geofence_status !== "NOT_EVALUATED");
   if (!geofence) return "";
@@ -92,6 +113,11 @@ function geofenceSummary(locations = []) {
   if (geofence.geofence_status === "LOCATION_NOT_CAPTURED") return `<small class="geofence-LOCATION_NOT_CAPTURED">Cerca não validada: localização não capturada</small>`;
   return `<small class="geofence-${geofence.geofence_status}">Cerca não validada</small>`;
 }
+// ============================================================
+// Inicialização, login, logout e troca de senha
+// ============================================================
+// Ao abrir o site, o sistema consulta a sessão ativa. Dependendo do perfil,
+// exibe a área do funcionário ou o painel do gestor. Sem sessão, mostra login.
 async function boot() {
   const data = await api("/api/me");
   if (!data.user) return show("#loginView");
@@ -130,6 +156,11 @@ $("#changePasswordButton").addEventListener("click", () => confirmModal("Alterar
   toast(result.message);
 }, true));
 
+// ============================================================
+// Área do funcionário
+// ============================================================
+// Carrega o painel individual: saudação, jornada configurada, próxima
+// marcação esperada, resumo do dia, linha do tempo, correções e hora extra.
 async function openEmployee() {
   show("#employeeView");
   $("#employeeName").textContent = currentUser.name;
@@ -164,6 +195,8 @@ async function loadEmployee() {
   }
 }
 
+// Espelho mensal do funcionário. Este relatório junta marcações reais e
+// correções aprovadas, permitindo que o usuário acompanhe a própria jornada.
 async function loadEmployeeHistory() {
   try {
     const data = await api(`/api/employee/history?month=${encodeURIComponent($("#historyMonth").value)}`);
@@ -195,6 +228,12 @@ window.justifyHistoricalOvertime = workDate => confirmModal("Justificar hora ext
 
 setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("pt-BR"); }, 500);
 
+// ============================================================
+// Registro de ponto
+// ============================================================
+// Antes de enviar a marcação, a tela tenta capturar a localização.
+// Se houver ponto muito próximo, pede confirmação. Se estiver fora da cerca,
+// pede justificativa, mantendo a regra flexível combinada para o projeto.
 async function sendPunch(location, confirmClose = false, geofenceReason = "") {
   return api("/api/punch", {
     method: "POST",
@@ -230,6 +269,7 @@ $("#punchButton").addEventListener("click", async () => {
   }
 });
 
+// Justificativa de hora extra detectada automaticamente pelo cálculo diário.
 $("#overtimeForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
@@ -240,6 +280,8 @@ $("#overtimeForm").addEventListener("submit", async event => {
   } catch (error) { toast(error.message, true); }
 });
 
+// Solicitação de correção feita pelo funcionário quando esquece uma marcação
+// ou precisa ajustar um horário. A aprovação continua dependendo do gestor.
 $("#correctionForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
@@ -250,6 +292,11 @@ $("#correctionForm").addEventListener("submit", async event => {
   } catch (error) { toast(error.message, true); }
 });
 
+// ============================================================
+// Painel do gestor
+// ============================================================
+// O gestor carrega configurações da empresa, lista de funcionários,
+// filtros do relatório e dados de auditoria para acompanhar a operação.
 async function openManager() {
   show("#managerView");
   $("#managerName").textContent = currentUser.name;
@@ -267,6 +314,7 @@ async function openManager() {
   await loadAudit();
 }
 
+// Configurações usadas nos cálculos: jornada, tolerância e cerca geográfica.
 async function loadSettings() {
   const data = await api("/api/manager/settings");
   const settings = data.settings;
@@ -310,6 +358,7 @@ $("#settingsForm").addEventListener("submit", async event => {
   } catch (error) { toast(error.message, true); }
 });
 
+// Lista e manutenção dos funcionários cadastrados pelo gestor.
 async function loadManagerUsers(selected = "") {
   const userData = await api("/api/manager/users");
   managerUsers = userData.users;
@@ -397,6 +446,8 @@ window.toggleEmployee = id => {
   });
 };
 
+// Recurso acadêmico para gerar cenários controlados de demonstração
+// sem depender de esperar um dia real de trabalho.
 $("#demoForm").addEventListener("submit", async event => {
   event.preventDefault();
   const button = event.submitter;
@@ -426,6 +477,8 @@ function managerQuery() {
   return new URLSearchParams({ from: $("#filterFrom").value, to: $("#filterTo").value, user_id: $("#filterUser").value });
 }
 
+// Relatório principal do gestor: consolida cada funcionário por dia,
+// mostrando marcações, situação da jornada, ocorrências, hora extra e localização.
 async function loadManager() {
   try {
     const data = await api(`/api/manager/report?${managerQuery()}`);
@@ -447,6 +500,8 @@ async function loadManager() {
   } catch (error) { toast(error.message, true); }
 }
 
+// Log de auditoria. Registra ações importantes do sistema para dar
+// rastreabilidade às alterações feitas por funcionário, gestor ou sistema.
 async function loadAudit() {
   try {
     const query = new URLSearchParams({
@@ -488,6 +543,11 @@ $("#restoreButton").addEventListener("click", () => {
 $("#filterButton").addEventListener("click", loadManager);
 $("#exportButton").addEventListener("click", () => { window.location.href = `/api/manager/export?${managerQuery()}`; });
 
+// ============================================================
+// Ações administrativas do gestor
+// ============================================================
+// Estas funções analisam correções, registram ocorrências, avaliam
+// justificativas de hora extra e inserem marcações corrigidas com auditoria.
 window.reviewCorrection = (id, status) => confirmModal(status === "APPROVED" ? "Aprovar correção" : "Rejeitar correção", `<label>Observação<textarea id="reviewNote" placeholder="Opcional"></textarea></label>`, async () => {
   await api(`/api/manager/corrections/${id}`, { method: "POST", body: JSON.stringify({ status, note: $("#reviewNote").value }) });
   toast("Solicitação analisada."); await loadManager();
@@ -508,6 +568,10 @@ window.managerCorrection = (userId, workDate) => confirmModal("Adicionar marcaç
   toast("Correção registrada com auditoria."); await loadManager();
 }, true);
 
+// ============================================================
+// Modal reutilizável
+// ============================================================
+// Usado para confirmações e formulários rápidos sem trocar de página.
 function confirmModal(title, content, onConfirm, html = false) {
   $("#modalTitle").textContent = title;
   $("#modalContent")[html ? "innerHTML" : "textContent"] = content;
