@@ -167,6 +167,62 @@ class SystemTest(unittest.TestCase):
         self.assertTrue(audit["entries"])
         self.assertTrue(all(item["action"] == "UPDATE_SETTINGS" for item in audit["entries"]))
 
+    def test_60_flexible_geofence_requires_reason_only_for_entry_and_exit(self):
+        manager = self.login("admin", "Admin@123")
+        self.request(
+            manager,
+            "/api/manager/settings",
+            {
+                "company_name": "Empresa Acadêmica",
+                "company_document": "00.000.000/0001-00",
+                "work_start": "08:00",
+                "lunch_start": "12:00",
+                "lunch_end": "13:30",
+                "work_end": "18:00",
+                "tolerance_minutes": 10,
+                "geofence_enabled": True,
+                "geofence_label": "Matriz",
+                "geofence_latitude": -23.55052,
+                "geofence_longitude": -46.633308,
+                "geofence_radius_meters": 100,
+            },
+        )
+        _, registration = self.create_employee(manager, "cerca")
+        employee = self.login(registration, "Teste@123")
+        outside = {
+            "status": "CAPTURED",
+            "latitude": -23.56052,
+            "longitude": -46.643308,
+            "accuracy": 20,
+        }
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            self.request(employee, "/api/punch", {"location": outside})
+        self.assertEqual(denied.exception.code, 409)
+        registered = self.request(
+            employee,
+            "/api/punch",
+            {"location": outside, "geofence_reason": "Atendimento externo"},
+        )
+        self.assertEqual(registered["geofence"]["status"], "OUTSIDE")
+
+        user, lunch_registration = self.create_employee(manager, "cerca-almoco")
+        entrada = server.now_local().replace(hour=8, minute=0, second=0, microsecond=0)
+        with server.db() as con:
+            con.execute(
+                """INSERT INTO punches(user_id,punched_at,punch_type,created_at)
+                   VALUES(?,?,?,?)""",
+                (
+                    user["id"],
+                    entrada.isoformat(),
+                    "ENTRADA",
+                    server.now_local().isoformat(),
+                ),
+            )
+        lunch_employee = self.login(lunch_registration, "Teste@123")
+        lunch = self.request(lunch_employee, "/api/punch", {"location": outside})
+        self.assertEqual(lunch["punch_type"], "SAIDA_ALMOCO")
+        self.assertEqual(lunch["geofence"]["status"], "INACTIVE_FOR_PUNCH")
+
     def test_90_backup_and_restore(self):
         manager = self.login("admin", "Admin@123")
         backup = manager.open(self.base + "/api/manager/backup").read()

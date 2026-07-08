@@ -65,12 +65,22 @@ function captureLocation() {
 
 function locationSummary(locations = []) {
   const captured = locations.find(location => location.status === "CAPTURED");
+  const geofence = locations.find(location => location.geofence_status && !["NOT_EVALUATED", "DISABLED", "INACTIVE_FOR_PUNCH"].includes(location.geofence_status));
+  const geofenceText = geofence ? `<small class="geofence-${geofence.geofence_status}">${geofence.geofence_status === "INSIDE" ? "Dentro da cerca" : geofence.geofence_status === "OUTSIDE" ? `Fora da cerca: ${Math.round(geofence.geofence_distance_meters || 0)} m de ${h(geofence.geofence_reference || "local")}${geofence.geofence_reason ? ` · ${h(geofence.geofence_reason)}` : ""}` : "Cerca não validada"}</small>` : "";
   if (captured) {
     const url = `https://www.google.com/maps?q=${captured.latitude},${captured.longitude}`;
     return `<a href="${url}" target="_blank" rel="noopener">Ver localização</a><small>Precisão aproximada: ${Math.round(captured.accuracy)} m</small>`;
   }
   const status = locations[0]?.status;
   return `<small>${status === "DENIED" ? "Localização não autorizada" : status === "TIMEOUT" ? "Localização não obtida a tempo" : "Localização indisponível"}</small>`;
+}
+
+function geofenceSummary(locations = []) {
+  const geofence = locations.find(location => location.geofence_status && !["NOT_EVALUATED", "DISABLED", "INACTIVE_FOR_PUNCH"].includes(location.geofence_status));
+  if (!geofence) return "";
+  if (geofence.geofence_status === "INSIDE") return `<small class="geofence-INSIDE">Dentro da cerca</small>`;
+  if (geofence.geofence_status === "OUTSIDE") return `<small class="geofence-OUTSIDE">Fora da cerca: ${Math.round(geofence.geofence_distance_meters || 0)} m de ${h(geofence.geofence_reference || "local")}${geofence.geofence_reason ? ` Â· ${h(geofence.geofence_reason)}` : ""}</small>`;
+  return `<small class="geofence-${geofence.geofence_status}">Cerca nÃ£o validada</small>`;
 }
 
 async function boot() {
@@ -154,7 +164,7 @@ async function loadEmployeeHistory() {
     $("#pendingOvertimeAlert").innerHTML = pending ? `<strong>${pending} hora(s) extra(s) aguardando justificativa.</strong> Use o botão “Justificar” na data correspondente.` : "";
     $("#employeeHistoryBody").innerHTML = employeeHistory.length ? employeeHistory.map(r => `<tr>
       <td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) : ""}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td>
       <td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span></td>
       <td>${r.overtime_minutes ? `<strong>+${minutes(r.overtime_minutes)}</strong>${r.overtime_reason ? `<small>${overtimeStatus[r.overtime_status] || "Justificativa enviada"}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment]}` : ""}</small>` : `<button class="text-button" onclick="justifyHistoricalOvertime('${r.date}')">Justificar</button>`}` : "—"}</td>
@@ -176,10 +186,17 @@ window.justifyHistoricalOvertime = workDate => confirmModal("Justificar hora ext
 
 setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString("pt-BR"); }, 500);
 
+async function sendPunch(location, confirmClose = false, geofenceReason = "") {
+  return api("/api/punch", {
+    method: "POST",
+    body: JSON.stringify({ location, confirm_close: confirmClose, geofence_reason: geofenceReason })
+  });
+}
+
 $("#punchButton").addEventListener("click", async () => {
   try {
     const location = await captureLocation();
-    await api("/api/punch", { method: "POST", body: JSON.stringify({ location }) });
+    await sendPunch(location);
     toast("Ponto registrado com sucesso.");
     await loadEmployee();
     await loadEmployeeHistory();
@@ -187,11 +204,19 @@ $("#punchButton").addEventListener("click", async () => {
     if (error.data?.confirmation_required) {
       confirmModal("Confirmar nova marcação", error.message, async () => {
         const location = await captureLocation();
-        await api("/api/punch", { method: "POST", body: JSON.stringify({ confirm_close: true, location }) });
+        await sendPunch(location, true);
         toast("Nova marcação confirmada.");
         await loadEmployee();
         await loadEmployeeHistory();
       });
+    } else if (error.data?.geofence_reason_required) {
+      confirmModal("Ponto fora da cerca", `<div class="form-stack"><p>VocÃª estÃ¡ a aproximadamente <strong>${error.data.distance_meters} m</strong> de <strong>${h(error.data.reference)}</strong>. O ponto serÃ¡ registrado, mas precisa de justificativa.</p><label>Justificativa<textarea id="geofenceReason" minlength="5" required placeholder="Ex.: atendimento externo ao cliente"></textarea></label></div>`, async () => {
+        const location = await captureLocation();
+        await sendPunch(location, false, $("#geofenceReason").value);
+        toast("Ponto registrado com justificativa de localizaÃ§Ã£o.");
+        await loadEmployee();
+        await loadEmployeeHistory();
+      }, true);
     } else toast(error.message, true);
   }
 });
@@ -243,6 +268,11 @@ async function loadSettings() {
   $("#settingLunchEnd").value = settings.lunch_end;
   $("#settingWorkEnd").value = settings.work_end;
   $("#settingTolerance").value = settings.tolerance_minutes;
+  $("#settingGeofenceEnabled").value = settings.geofence_enabled ? "1" : "0";
+  $("#settingGeofenceLabel").value = settings.geofence_label || "Local principal";
+  $("#settingGeofenceLatitude").value = settings.geofence_latitude ?? "";
+  $("#settingGeofenceLongitude").value = settings.geofence_longitude ?? "";
+  $("#settingGeofenceRadius").value = settings.geofence_radius_meters || 200;
 }
 
 $("#settingsForm").addEventListener("submit", async event => {
@@ -257,7 +287,12 @@ $("#settingsForm").addEventListener("submit", async event => {
         lunch_start: $("#settingLunchStart").value,
         lunch_end: $("#settingLunchEnd").value,
         work_end: $("#settingWorkEnd").value,
-        tolerance_minutes: Number($("#settingTolerance").value)
+        tolerance_minutes: Number($("#settingTolerance").value),
+        geofence_enabled: $("#settingGeofenceEnabled").value === "1",
+        geofence_label: $("#settingGeofenceLabel").value,
+        geofence_latitude: $("#settingGeofenceLatitude").value,
+        geofence_longitude: $("#settingGeofenceLongitude").value,
+        geofence_radius_meters: Number($("#settingGeofenceRadius").value)
       })
     });
     toast(`${data.message} Carga diária: ${minutes(data.workday_minutes)}.`);
@@ -394,7 +429,7 @@ async function loadManager() {
     ].map(([name, value]) => `<div class="stat"><span>${name}</span><strong>${value}</strong></div>`).join("");
     $("#reportBody").innerHTML = data.report.map(r => `<tr>
       <td><strong>${r.name}</strong><small>${r.registration}</small></td><td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) : ""}</td><td>${minutes(r.worked_minutes)}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td><td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span>${r.overtime_minutes ? `<small>+${minutes(r.overtime_minutes)}</small>` : ""}</td>
       <td><small>${h(r.overtime_reason || "")}${r.overtime_status ? `<br><b>${overtimeStatus[r.overtime_status] || ""}</b>` : ""}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment] || ""}` : ""}${r.overtime_review_note ? `<br>${h(r.overtime_review_note)}` : ""}${r.day_note ? `<br>${h(r.day_note)}` : ""}</small></td>
       <td>${r.overtime_minutes ? (r.overtime_reason ? `<button class="text-button" onclick="reviewOvertime(${r.user_id},'${r.date}')">Analisar justificativa</button>` : `<small>Aguardando justificativa</small>`) : ""}<button class="text-button" onclick="dayNote(${r.user_id},'${r.date}')">Ocorrência</button><button class="text-button" onclick="managerCorrection(${r.user_id},'${r.date}')">Corrigir</button></td>

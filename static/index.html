@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Ponto Certa Hora</title>
-    <link rel="stylesheet" href="/styles.css?v=20260705-2">
+    <link rel="stylesheet" href="/styles.css?v=20260707-1">
 </head>
 <body>
   <main id="app" class="app-shell">
@@ -87,6 +87,11 @@
             <label>Retorno almoço<input id="settingLunchEnd" type="time" required></label>
             <label>Saída<input id="settingWorkEnd" type="time" required></label>
             <label>Tolerância diária<input id="settingTolerance" type="number" min="0" max="60" required></label>
+            <label>Cerca ativa<select id="settingGeofenceEnabled"><option value="0">Não</option><option value="1">Sim</option></select></label>
+            <label>Nome do local<input id="settingGeofenceLabel" placeholder="Ex.: Matriz"></label>
+            <label>Latitude<input id="settingGeofenceLatitude" type="number" step="any" placeholder="-23.550520"></label>
+            <label>Longitude<input id="settingGeofenceLongitude" type="number" step="any" placeholder="-46.633308"></label>
+            <label>Raio da cerca (m)<input id="settingGeofenceRadius" type="number" min="10" max="10000" value="200"></label>
             <button class="primary" type="submit">Salvar configurações</button>
           </form>
         </article>
@@ -159,6 +164,6 @@
   </main>
   <div id="modal" class="modal hidden"><div class="modal-box"><h2 id="modalTitle"></h2><div id="modalContent"></div><div class="modal-actions"><button id="modalCancel" class="ghost">Cancelar</button><button id="modalConfirm" class="primary">Confirmar</button></div></div></div>
   <div id="toast" class="toast hidden"></div>
-    <script src="/app.js?v=20260705-2"></script>
+    <script src="/app.js?v=20260707-1"></script>
 </body>
 </html>

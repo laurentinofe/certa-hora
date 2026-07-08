@@ -3,6 +3,7 @@ import calendar
 import hashlib
 import hmac
 import json
+import math
 import mimetypes
 import os
 import secrets
@@ -148,6 +149,11 @@ def init_db():
                 work_end TEXT NOT NULL DEFAULT '18:00',
                 workday_minutes INTEGER NOT NULL DEFAULT 510,
                 tolerance_minutes INTEGER NOT NULL DEFAULT 10,
+                geofence_enabled INTEGER NOT NULL DEFAULT 0,
+                geofence_latitude REAL,
+                geofence_longitude REAL,
+                geofence_radius_meters INTEGER NOT NULL DEFAULT 200,
+                geofence_label TEXT NOT NULL DEFAULT 'Local principal',
                 updated_at TEXT NOT NULL
             );
             """
@@ -177,6 +183,35 @@ def init_db():
         if "location_status" not in punch_columns:
             con.execute(
                 "ALTER TABLE punches ADD COLUMN location_status TEXT NOT NULL DEFAULT 'NOT_COLLECTED'"
+            )
+        if "geofence_status" not in punch_columns:
+            con.execute(
+                "ALTER TABLE punches ADD COLUMN geofence_status TEXT NOT NULL DEFAULT 'NOT_EVALUATED'"
+            )
+        if "geofence_distance_meters" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN geofence_distance_meters REAL")
+        if "geofence_reference" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN geofence_reference TEXT")
+        if "geofence_reason" not in punch_columns:
+            con.execute("ALTER TABLE punches ADD COLUMN geofence_reason TEXT")
+        settings_columns = {
+            row["name"] for row in con.execute("PRAGMA table_info(company_settings)")
+        }
+        if "geofence_enabled" not in settings_columns:
+            con.execute(
+                "ALTER TABLE company_settings ADD COLUMN geofence_enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        if "geofence_latitude" not in settings_columns:
+            con.execute("ALTER TABLE company_settings ADD COLUMN geofence_latitude REAL")
+        if "geofence_longitude" not in settings_columns:
+            con.execute("ALTER TABLE company_settings ADD COLUMN geofence_longitude REAL")
+        if "geofence_radius_meters" not in settings_columns:
+            con.execute(
+                "ALTER TABLE company_settings ADD COLUMN geofence_radius_meters INTEGER NOT NULL DEFAULT 200"
+            )
+        if "geofence_label" not in settings_columns:
+            con.execute(
+                "ALTER TABLE company_settings ADD COLUMN geofence_label TEXT NOT NULL DEFAULT 'Local principal'"
             )
         con.execute(
             """INSERT OR IGNORE INTO company_settings(
@@ -226,11 +261,76 @@ def get_settings(con):
         "work_end": "18:00",
         "workday_minutes": WORKDAY_MINUTES,
         "tolerance_minutes": TOLERANCE_MINUTES,
+        "geofence_enabled": 0,
+        "geofence_latitude": None,
+        "geofence_longitude": None,
+        "geofence_radius_meters": 200,
+        "geofence_label": "Local principal",
     }
 
 
 def parse_iso(value):
     return datetime.fromisoformat(value)
+
+
+def haversine_meters(lat1, lon1, lat2, lon2):
+    radius = 6_371_000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def evaluate_geofence(settings, punch_type, latitude, longitude, location_status):
+    active_types = {"ENTRADA", "SAIDA"}
+    label = settings.get("geofence_label") or "Local principal"
+    if punch_type not in active_types:
+        return {"status": "INACTIVE_FOR_PUNCH", "distance": None, "reference": label}
+    if not settings.get("geofence_enabled"):
+        return {"status": "DISABLED", "distance": None, "reference": label}
+    reference_latitude = settings.get("geofence_latitude")
+    reference_longitude = settings.get("geofence_longitude")
+    radius = settings.get("geofence_radius_meters") or 0
+    if reference_latitude is None or reference_longitude is None or radius <= 0:
+        return {"status": "NOT_CONFIGURED", "distance": None, "reference": label}
+    if location_status != "CAPTURED" or latitude is None or longitude is None:
+        return {"status": "LOCATION_NOT_CAPTURED", "distance": None, "reference": label}
+    distance = haversine_meters(
+        latitude,
+        longitude,
+        float(reference_latitude),
+        float(reference_longitude),
+    )
+    return {
+        "status": "INSIDE" if distance <= int(radius) else "OUTSIDE",
+        "distance": distance,
+        "reference": label,
+    }
+
+
+def location_export_text(location):
+    geofence = location.get("geofence_status", "NOT_EVALUATED")
+    distance = location.get("geofence_distance_meters")
+    reason = location.get("geofence_reason")
+    parts = []
+    if location["status"] == "CAPTURED":
+        parts.append(
+            f'{location["latitude"]:.6f},{location["longitude"]:.6f} '
+            f'(precisao {location["accuracy"]:.0f}m)'
+        )
+    else:
+        parts.append(location["status"])
+    parts.append(f"Cerca: {geofence}")
+    if distance is not None:
+        parts.append(f"Distancia: {distance:.0f}m")
+    if reason:
+        parts.append(f"Justificativa: {reason}")
+    return " - ".join(parts)
 
 
 def effective_punches(con, user_id, date_from=None, date_to=None):
@@ -802,11 +902,36 @@ class Handler(BaseHTTPRequestHandler):
                     if seconds < 30 and not payload.get("confirm_close"):
                         return self.send_json(409, {"confirmation_required": True, "seconds": max(0, int(seconds)), "error": "Existe uma marcação feita há menos de 30 segundos. Deseja registrar novamente?"})
                 punch_type = PUNCH_TYPES[len(punches) % len(PUNCH_TYPES)]
+                settings = get_settings(con)
+                geofence = evaluate_geofence(
+                    settings,
+                    punch_type,
+                    latitude,
+                    longitude,
+                    location_status,
+                )
+                geofence_reason = str(payload.get("geofence_reason", "")).strip()
+                if geofence["status"] == "OUTSIDE" and len(geofence_reason) < 5:
+                    return self.send_json(
+                        409,
+                        {
+                            "geofence_reason_required": True,
+                            "distance_meters": round(geofence["distance"] or 0),
+                            "radius_meters": int(settings.get("geofence_radius_meters") or 0),
+                            "reference": geofence["reference"],
+                            "punch_type": punch_type,
+                            "error": (
+                                "Voce esta fora da cerca geografica definida para "
+                                "esta marcacao. Informe uma justificativa para registrar o ponto."
+                            ),
+                        },
+                    )
                 cursor = con.execute(
                     """INSERT INTO punches(
                        user_id,punched_at,punch_type,created_at,latitude,longitude,
-                       location_accuracy,location_status)
-                       VALUES(?,?,?,?,?,?,?,?)""",
+                       location_accuracy,location_status,geofence_status,
+                       geofence_distance_meters,geofence_reference,geofence_reason)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         user["id"],
                         stamp.isoformat(),
@@ -816,15 +941,35 @@ class Handler(BaseHTTPRequestHandler):
                         longitude,
                         accuracy,
                         location_status,
+                        geofence["status"],
+                        geofence["distance"],
+                        geofence["reference"],
+                        geofence_reason or None,
                     ),
                 )
                 con.execute(
                     "INSERT INTO audit_log(actor_id,action,entity,entity_id,details,created_at) VALUES(?,?,?,?,?,?)",
-                    (user["id"], "CREATE", "PUNCH", cursor.lastrowid, punch_type, stamp.isoformat()),
+                    (
+                        user["id"],
+                        "CREATE",
+                        "PUNCH",
+                        cursor.lastrowid,
+                        json.dumps(
+                            {
+                                "punch_type": punch_type,
+                                "geofence_status": geofence["status"],
+                                "distance_meters": round(geofence["distance"])
+                                if geofence["distance"] is not None
+                                else None,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        stamp.isoformat(),
+                    ),
                 )
                 updated = effective_punches(con, user["id"], today, today)
-                summary = day_summary(updated, get_settings(con))
-            return self.send_json(201, {"message": "Ponto registrado com sucesso.", "summary": summary, "punch_type": punch_type})
+                summary = day_summary(updated, settings)
+            return self.send_json(201, {"message": "Ponto registrado com sucesso.", "summary": summary, "punch_type": punch_type, "geofence": geofence})
         if path == "/api/overtime-justification":
             user = self.require_user("EMPLOYEE")
             if not user:
@@ -948,6 +1093,23 @@ class Handler(BaseHTTPRequestHandler):
             tolerance = int(payload.get("tolerance_minutes", 10))
             if tolerance < 0 or tolerance > 60:
                 raise ValueError("A tolerância deve estar entre 0 e 60 minutos.")
+            geofence_enabled = 1 if payload.get("geofence_enabled") else 0
+            geofence_label = str(payload.get("geofence_label", "Local principal")).strip() or "Local principal"
+            geofence_latitude = geofence_longitude = None
+            geofence_radius = int(payload.get("geofence_radius_meters") or 200)
+            if geofence_radius < 10 or geofence_radius > 10000:
+                raise ValueError("O raio da cerca deve estar entre 10 e 10000 metros.")
+            if geofence_enabled:
+                try:
+                    geofence_latitude = float(payload.get("geofence_latitude"))
+                    geofence_longitude = float(payload.get("geofence_longitude"))
+                    if not (
+                        -90 <= geofence_latitude <= 90
+                        and -180 <= geofence_longitude <= 180
+                    ):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise ValueError("Informe latitude e longitude validas para ativar a cerca.")
             stamp = now_local().isoformat()
             with db() as con:
                 before = get_settings(con)
@@ -955,13 +1117,19 @@ class Handler(BaseHTTPRequestHandler):
                     """UPDATE company_settings SET
                        company_name=?,company_document=?,work_start=?,lunch_start=?,
                        lunch_end=?,work_end=?,workday_minutes=?,tolerance_minutes=?,
-                       updated_at=? WHERE id=1""",
+                       geofence_enabled=?,geofence_latitude=?,geofence_longitude=?,
+                       geofence_radius_meters=?,geofence_label=?,updated_at=? WHERE id=1""",
                     (
                         company_name,
                         company_document,
                         *schedule_fields,
                         workday_minutes,
                         tolerance,
+                        geofence_enabled,
+                        geofence_latitude,
+                        geofence_longitude,
+                        geofence_radius,
+                        geofence_label,
                         stamp,
                     ),
                 )
@@ -981,6 +1149,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "company_document": company_document,
                                     "workday_minutes": workday_minutes,
                                     "tolerance_minutes": tolerance,
+                                    "geofence_enabled": geofence_enabled,
+                                    "geofence_radius_meters": geofence_radius,
+                                    "geofence_label": geofence_label,
                                 },
                             },
                             ensure_ascii=False,
@@ -1402,6 +1573,10 @@ def build_report(con, employees, date_from, date_to):
                                 "latitude": p.get("latitude"),
                                 "longitude": p.get("longitude"),
                                 "accuracy": p.get("location_accuracy"),
+                                "geofence_status": p.get("geofence_status", "NOT_EVALUATED"),
+                                "geofence_distance_meters": p.get("geofence_distance_meters"),
+                                "geofence_reference": p.get("geofence_reference"),
+                                "geofence_reason": p.get("geofence_reason"),
                             }
                             for p in items
                         ],
