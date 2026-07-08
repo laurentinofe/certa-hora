@@ -1,8 +1,8 @@
 ﻿const $ = (selector) => document.querySelector(selector);
 const h = (value) => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
-const labels = { ENTRADA: "Entrada", SAIDA_ALMOCO: "SaÃ­da para almoÃ§o", RETORNO_ALMOCO: "Retorno do almoÃ§o", SAIDA: "SaÃ­da" };
+const labels = { ENTRADA: "Entrada", SAIDA_ALMOCO: "Saída para almoço", RETORNO_ALMOCO: "Retorno do almoço", SAIDA: "Saída" };
 const states = { SEM_REGISTROS: "Sem registros", INCOMPLETO: "Jornada incompleta", HORA_EXTRA: "Hora extra", CARGA_INFERIOR: "Carga inferior", REGULAR: "Regular" };
-const overtimeStatus = { PENDING: "Aguardando anÃ¡lise", APPROVED: "Justificativa validada", REJECTED: "Justificativa contestada" };
+const overtimeStatus = { PENDING: "Aguardando análise", APPROVED: "Justificativa validada", REJECTED: "Justificativa contestada" };
 const overtimeTreatment = { PAYMENT: "Pagamento", TIME_BANK: "Banco de horas", HR_REVIEW: "Encaminhado ao RH" };
 let currentUser = null;
 let employeeData = null;
@@ -12,8 +12,8 @@ let managerUsers = [];
 async function api(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: "Falha na comunicaÃ§Ã£o." }));
-    const error = new Error(body.error || "NÃ£o foi possÃ­vel concluir.");
+    const body = await response.json().catch(() => ({ error: "Falha na comunicação." }));
+    const error = new Error(body.error || "Não foi possível concluir.");
     error.data = body;
     error.status = response.status;
     throw error;
@@ -41,6 +41,12 @@ function localDate(value) {
   return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
 }
 
+function localInputToSaoPauloIso(value) {
+  if (!value) return "";
+  const withSeconds = value.length === 16 ? `${value}:00` : value;
+  return `${withSeconds}-03:00`;
+}
+
 function captureLocation() {
   return new Promise(resolve => {
     if (!navigator.geolocation) {
@@ -66,13 +72,13 @@ function captureLocation() {
 function locationSummary(locations = []) {
   const captured = locations.find(location => location.status === "CAPTURED");
   const geofence = locations.find(location => location.geofence_status && location.geofence_status !== "NOT_EVALUATED");
-  const geofenceText = geofence ? `<small class="geofence-${geofence.geofence_status}">${geofence.geofence_status === "INSIDE" ? "Dentro da cerca" : geofence.geofence_status === "OUTSIDE" ? `Fora da cerca: ${Math.round(geofence.geofence_distance_meters || 0)} m de ${h(geofence.geofence_reference || "local")}${geofence.geofence_reason ? ` Â· ${h(geofence.geofence_reason)}` : ""}` : "Cerca nÃ£o validada"}</small>` : "";
+  const geofenceText = geofence ? `<small class="geofence-${geofence.geofence_status}">${geofence.geofence_status === "INSIDE" ? "Dentro da cerca" : geofence.geofence_status === "OUTSIDE" ? `Fora da cerca: ${Math.round(geofence.geofence_distance_meters || 0)} m de ${h(geofence.geofence_reference || "local")}${geofence.geofence_reason ? ` · ${h(geofence.geofence_reason)}` : ""}` : "Cerca não validada"}</small>` : "";
   if (captured) {
     const url = `https://www.google.com/maps?q=${captured.latitude},${captured.longitude}`;
-    return `<a href="${url}" target="_blank" rel="noopener">Ver localizaÃ§Ã£o</a><small>PrecisÃ£o aproximada: ${Math.round(captured.accuracy)} m</small>`;
+    return `<a href="${url}" target="_blank" rel="noopener">Ver localização</a><small>Precisão aproximada: ${Math.round(captured.accuracy)} m</small>`;
   }
   const status = locations[0]?.status;
-  return `<small>${status === "DENIED" ? "LocalizaÃ§Ã£o nÃ£o autorizada" : status === "TIMEOUT" ? "LocalizaÃ§Ã£o nÃ£o obtida a tempo" : "LocalizaÃ§Ã£o indisponÃ­vel"}</small>`;
+  return `<small>${status === "DENIED" ? "Localização não autorizada" : status === "TIMEOUT" ? "Localização não obtida a tempo" : "Localização indisponível"}</small>`;
 }
 
 function geofenceSummary(locations = []) {
@@ -110,9 +116,9 @@ document.querySelectorAll(".logout").forEach(button => button.addEventListener("
   show("#loginView");
 }));
 
-$("#changePasswordButton").addEventListener("click", () => confirmModal("Alterar minha senha", `<div class="form-stack"><label>Senha atual<input id="currentPassword" type="password" autocomplete="current-password"></label><label>Nova senha<input id="newPassword" type="password" minlength="8" autocomplete="new-password"></label><label>Confirmar nova senha<input id="confirmNewPassword" type="password" minlength="8" autocomplete="new-password"></label><p class="legal-note">ApÃ³s a alteraÃ§Ã£o, todas as sessÃµes desta matrÃ­cula serÃ£o encerradas.</p></div>`, async () => {
+$("#changePasswordButton").addEventListener("click", () => confirmModal("Alterar minha senha", `<div class="form-stack"><label>Senha atual<input id="currentPassword" type="password" autocomplete="current-password"></label><label>Nova senha<input id="newPassword" type="password" minlength="8" autocomplete="new-password"></label><label>Confirmar nova senha<input id="confirmNewPassword" type="password" minlength="8" autocomplete="new-password"></label><p class="legal-note">Após a alteração, todas as sessões desta matrícula serão encerradas.</p></div>`, async () => {
   const newPassword = $("#newPassword").value;
-  if (newPassword !== $("#confirmNewPassword").value) throw new Error("A confirmaÃ§Ã£o da nova senha nÃ£o confere.");
+  if (newPassword !== $("#confirmNewPassword").value) throw new Error("A confirmação da nova senha não confere.");
   const result = await api("/api/change-password", {
     method: "POST",
     body: JSON.stringify({ current_password: $("#currentPassword").value, new_password: newPassword })
@@ -138,23 +144,23 @@ async function openEmployee() {
 async function loadEmployee() {
   employeeData = await api("/api/dashboard");
   const settings = employeeData.settings;
-  $("#employeeSchedule").textContent = `${settings.work_start}â€“${settings.lunch_start} Â· ${settings.lunch_end}â€“${settings.work_end}`;
+  $("#employeeSchedule").textContent = `${settings.work_start}–${settings.lunch_start} · ${settings.lunch_end}–${settings.work_end}`;
   $("#todayLabel").textContent = new Date(employeeData.server_time).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
   $("#nextPunch").textContent = labels[employeeData.next_type];
   $("#workedTime").textContent = minutes(employeeData.summary.worked_minutes);
   $("#dayState").textContent = states[employeeData.summary.state];
   $("#dayState").className = `status state-${employeeData.summary.state}`;
-  $("#timeline").innerHTML = employeeData.punches.length ? employeeData.punches.map(p => `<div class="timeline-item"><span class="dot"></span><div><strong>${labels[p.punch_type]}</strong><small>${new Date(p.punched_at).toLocaleTimeString("pt-BR")}${p.corrected ? " Â· corrigido" : ""}</small></div></div>`).join("") : `<p class="empty">Nenhuma marcaÃ§Ã£o realizada hoje.</p>`;
+  $("#timeline").innerHTML = employeeData.punches.length ? employeeData.punches.map(p => `<div class="timeline-item"><span class="dot"></span><div><strong>${labels[p.punch_type]}</strong><small>${new Date(p.punched_at).toLocaleTimeString("pt-BR")}${p.corrected ? " · corrigido" : ""}</small></div></div>`).join("") : `<p class="empty">Nenhuma marcação realizada hoje.</p>`;
   $("#correctionList").innerHTML = employeeData.corrections.slice(0, 5).map(c => `<div class="compact-item"><span>${c.requested_at_value ? new Date(c.requested_at_value).toLocaleString("pt-BR") : c.action}</span><b class="status state-${c.status}">${c.status}</b></div>`).join("");
   const needsReason = employeeData.summary.overtime_minutes > 0 && !employeeData.justification;
   $("#overtimeCard").classList.toggle("hidden", !needsReason);
-  $("#overtimeValue").textContent = `${minutes(employeeData.summary.overtime_minutes)} alÃ©m da jornada`;
+  $("#overtimeValue").textContent = `${minutes(employeeData.summary.overtime_minutes)} além da jornada`;
   const reviewed = employeeData.summary.overtime_minutes > 0 && employeeData.justification;
   $("#overtimeReviewCard").classList.toggle("hidden", !reviewed);
   if (reviewed) {
     const item = employeeData.justification;
     $("#overtimeReviewTitle").textContent = overtimeStatus[item.status] || "Justificativa enviada";
-    $("#overtimeReviewDetails").innerHTML = `<p><strong>Horas apuradas:</strong> ${minutes(employeeData.summary.overtime_minutes)} â€” preservadas independentemente da anÃ¡lise.</p><p><strong>Motivo informado:</strong> ${h(item.reason)}</p>${item.treatment ? `<p><strong>Tratamento:</strong> ${overtimeTreatment[item.treatment] || h(item.treatment)}</p>` : ""}${item.review_note ? `<p><strong>ObservaÃ§Ã£o do gestor:</strong> ${h(item.review_note)}</p>` : ""}`;
+    $("#overtimeReviewDetails").innerHTML = `<p><strong>Horas apuradas:</strong> ${minutes(employeeData.summary.overtime_minutes)} — preservadas independentemente da análise.</p><p><strong>Motivo informado:</strong> ${h(item.reason)}</p>${item.treatment ? `<p><strong>Tratamento:</strong> ${overtimeTreatment[item.treatment] || h(item.treatment)}</p>` : ""}${item.review_note ? `<p><strong>Observação do gestor:</strong> ${h(item.review_note)}</p>` : ""}`;
   }
 }
 
@@ -164,15 +170,15 @@ async function loadEmployeeHistory() {
     employeeHistory = data.history;
     const pending = data.pending_overtime.length;
     $("#pendingOvertimeAlert").classList.toggle("hidden", pending === 0);
-    $("#pendingOvertimeAlert").innerHTML = pending ? `<strong>${pending} hora(s) extra(s) aguardando justificativa.</strong> Use o botÃ£o â€œJustificarâ€ na data correspondente.` : "";
+    $("#pendingOvertimeAlert").innerHTML = pending ? `<strong>${pending} hora(s) extra(s) aguardando justificativa.</strong> Use o botão “Justificar” na data correspondente.` : "";
     $("#employeeHistoryBody").innerHTML = employeeHistory.length ? employeeHistory.map(r => `<tr>
       <td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" Â· ") : "â€”"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td>
       <td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span></td>
-      <td>${r.overtime_minutes ? `<strong>+${minutes(r.overtime_minutes)}</strong>${r.overtime_reason ? `<small>${overtimeStatus[r.overtime_status] || "Justificativa enviada"}${r.overtime_treatment ? ` Â· ${overtimeTreatment[r.overtime_treatment]}` : ""}</small>` : `<button class="text-button" onclick="justifyHistoricalOvertime('${r.date}')">Justificar</button>`}` : "â€”"}</td>
+      <td>${r.overtime_minutes ? `<strong>+${minutes(r.overtime_minutes)}</strong>${r.overtime_reason ? `<small>${overtimeStatus[r.overtime_status] || "Justificativa enviada"}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment]}` : ""}</small>` : `<button class="text-button" onclick="justifyHistoricalOvertime('${r.date}')">Justificar</button>`}` : "—"}</td>
       <td><small>${h(r.day_note || "")}</small></td>
-    </tr>`).join("") : `<tr><td colspan="6" class="empty">Nenhum registro disponÃ­vel neste mÃªs.</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="6" class="empty">Nenhum registro disponível neste mês.</td></tr>`;
   } catch (error) {
     toast(error.message, true);
   }
@@ -205,18 +211,18 @@ $("#punchButton").addEventListener("click", async () => {
     await loadEmployeeHistory();
   } catch (error) {
     if (error.data?.confirmation_required) {
-      confirmModal("Confirmar nova marcaÃ§Ã£o", error.message, async () => {
+      confirmModal("Confirmar nova marcação", error.message, async () => {
         const location = await captureLocation();
         await sendPunch(location, true);
-        toast("Nova marcaÃ§Ã£o confirmada.");
+        toast("Nova marcação confirmada.");
         await loadEmployee();
         await loadEmployeeHistory();
       });
     } else if (error.data?.geofence_reason_required) {
-      confirmModal("Ponto fora da cerca", `<div class="form-stack"><p>VocÃƒÂª estÃƒÂ¡ a aproximadamente <strong>${error.data.distance_meters} m</strong> de <strong>${h(error.data.reference)}</strong>. O ponto serÃƒÂ¡ registrado, mas precisa de justificativa.</p><label>Justificativa<textarea id="geofenceReason" minlength="5" required placeholder="Ex.: atendimento externo ao cliente"></textarea></label></div>`, async () => {
+      confirmModal("Ponto fora da cerca", `<div class="form-stack"><p>Você está a aproximadamente <strong>${error.data.distance_meters} m</strong> de <strong>${h(error.data.reference)}</strong>. O ponto será registrado, mas precisa de justificativa.</p><label>Justificativa<textarea id="geofenceReason" minlength="5" required placeholder="Ex.: atendimento externo ao cliente"></textarea></label></div>`, async () => {
         const location = await captureLocation();
         await sendPunch(location, false, $("#geofenceReason").value);
-        toast("Ponto registrado com justificativa de localizaÃƒÂ§ÃƒÂ£o.");
+        toast("Ponto registrado com justificativa de localização.");
         await loadEmployee();
         await loadEmployeeHistory();
       }, true);
@@ -237,9 +243,9 @@ $("#overtimeForm").addEventListener("submit", async event => {
 $("#correctionForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
-    await api("/api/corrections", { method: "POST", body: JSON.stringify({ action: "ADD", requested_at_value: new Date($("#correctionDate").value).toISOString(), requested_type: $("#correctionType").value, reason: $("#correctionReason").value }) });
+    await api("/api/corrections", { method: "POST", body: JSON.stringify({ action: "ADD", requested_at_value: localInputToSaoPauloIso($("#correctionDate").value), requested_type: $("#correctionType").value, reason: $("#correctionReason").value }) });
     event.target.reset();
-    toast("SolicitaÃ§Ã£o enviada ao gestor.");
+    toast("Solicitação enviada ao gestor.");
     await loadEmployee();
   } catch (error) { toast(error.message, true); }
 });
@@ -298,7 +304,7 @@ $("#settingsForm").addEventListener("submit", async event => {
         geofence_radius_meters: Number($("#settingGeofenceRadius").value)
       })
     });
-    toast(`${data.message} Carga diÃ¡ria: ${minutes(data.workday_minutes)}.`);
+    toast(`${data.message} Carga diária: ${minutes(data.workday_minutes)}.`);
     await loadManager();
     await loadAudit();
   } catch (error) { toast(error.message, true); }
@@ -307,12 +313,12 @@ $("#settingsForm").addEventListener("submit", async event => {
 async function loadManagerUsers(selected = "") {
   const userData = await api("/api/manager/users");
   managerUsers = userData.users;
-  $("#filterUser").innerHTML = `<option value="">Todos</option>` + managerUsers.map(u => `<option value="${u.id}">${h(u.name)} Â· ${h(u.registration)}</option>`).join("");
-  $("#demoUser").innerHTML = `<option value="">Selecione</option>` + managerUsers.filter(u => u.active).map(u => `<option value="${u.id}">${h(u.name)} Â· ${h(u.registration)}</option>`).join("");
+  $("#filterUser").innerHTML = `<option value="">Todos</option>` + managerUsers.map(u => `<option value="${u.id}">${h(u.name)} · ${h(u.registration)}</option>`).join("");
+  $("#demoUser").innerHTML = `<option value="">Selecione</option>` + managerUsers.filter(u => u.active).map(u => `<option value="${u.id}">${h(u.name)} · ${h(u.registration)}</option>`).join("");
   $("#employeeBody").innerHTML = managerUsers.map(u => `<tr>
     <td><strong>${h(u.name)}</strong></td>
     <td>${h(u.registration)}</td>
-    <td>${u.admission_date ? localDate(u.admission_date) : "â€”"}<small>${h(u.position || "")}</small></td>
+    <td>${u.admission_date ? localDate(u.admission_date) : "—"}<small>${h(u.position || "")}</small></td>
     <td><span class="status state-${u.active ? "APPROVED" : "REJECTED"}">${u.active ? "Ativo" : "Inativo"}</span></td>
     <td>
       <button class="text-button" onclick="editEmployee(${u.id})">Editar</button>
@@ -342,9 +348,9 @@ $("#employeeForm").addEventListener("submit", async event => {
     event.target.reset();
     await loadManagerUsers(String(data.user.id));
     await loadManager();
-    toast("FuncionÃ¡rio cadastrado. A matrÃ­cula jÃ¡ pode ser utilizada.");
+    toast("Funcionário cadastrado. A matrícula já pode ser utilizada.");
   } catch (error) {
-    toast(error.status === 409 ? "Essa matrÃ­cula jÃ¡ estÃ¡ cadastrada." : error.message, true);
+    toast(error.status === 409 ? "Essa matrícula já está cadastrada." : error.message, true);
   } finally {
     button.disabled = false;
   }
@@ -353,21 +359,21 @@ $("#employeeForm").addEventListener("submit", async event => {
 window.editEmployee = id => {
   const employee = managerUsers.find(user => user.id === id);
   if (!employee) return;
-  confirmModal("Editar funcionÃ¡rio", `<div class="form-stack"><label>Nome completo<input id="editEmployeeName" value="${h(employee.name)}"></label><label>MatrÃ­cula<input id="editEmployeeRegistration" value="${h(employee.registration)}"></label><label>Data de admissÃ£o<input id="editEmployeeAdmission" type="date" value="${h(employee.admission_date || "")}"></label><label>Cargo<input id="editEmployeePosition" value="${h(employee.position || "")}"></label></div>`, async () => {
+  confirmModal("Editar funcionário", `<div class="form-stack"><label>Nome completo<input id="editEmployeeName" value="${h(employee.name)}"></label><label>Matrícula<input id="editEmployeeRegistration" value="${h(employee.registration)}"></label><label>Data de admissão<input id="editEmployeeAdmission" type="date" value="${h(employee.admission_date || "")}"></label><label>Cargo<input id="editEmployeePosition" value="${h(employee.position || "")}"></label></div>`, async () => {
     await api(`/api/manager/users/${id}/update`, {
       method: "POST",
       body: JSON.stringify({ name: $("#editEmployeeName").value, registration: $("#editEmployeeRegistration").value, admission_date: $("#editEmployeeAdmission").value, position: $("#editEmployeePosition").value })
     });
     await loadManagerUsers(String(id));
     await loadManager();
-    toast("Dados do funcionÃ¡rio atualizados.");
+    toast("Dados do funcionário atualizados.");
   }, true);
 };
 
 window.resetEmployeePassword = id => {
   const employee = managerUsers.find(user => user.id === id);
   if (!employee) return;
-  confirmModal("Redefinir senha", `<div class="form-stack"><p>A nova senha substituirÃ¡ imediatamente o acesso de <strong>${h(employee.name)}</strong>.</p><label>Nova senha<input id="resetPassword" type="password" minlength="8" placeholder="MÃ­nimo de 8 caracteres"></label></div>`, async () => {
+  confirmModal("Redefinir senha", `<div class="form-stack"><p>A nova senha substituirá imediatamente o acesso de <strong>${h(employee.name)}</strong>.</p><label>Nova senha<input id="resetPassword" type="password" minlength="8" placeholder="Mínimo de 8 caracteres"></label></div>`, async () => {
     await api(`/api/manager/users/${id}/reset-password`, {
       method: "POST",
       body: JSON.stringify({ password: $("#resetPassword").value })
@@ -380,14 +386,14 @@ window.toggleEmployee = id => {
   const employee = managerUsers.find(user => user.id === id);
   if (!employee) return;
   const activate = !employee.active;
-  confirmModal(`${activate ? "Ativar" : "Desativar"} funcionÃ¡rio`, `${activate ? "O acesso serÃ¡ restaurado." : "O funcionÃ¡rio nÃ£o conseguirÃ¡ entrar atÃ© ser reativado."}`, async () => {
+  confirmModal(`${activate ? "Ativar" : "Desativar"} funcionário`, `${activate ? "O acesso será restaurado." : "O funcionário não conseguirá entrar até ser reativado."}`, async () => {
     await api(`/api/manager/users/${id}/status`, {
       method: "POST",
       body: JSON.stringify({ active: activate })
     });
     await loadManagerUsers();
     await loadManager();
-    toast(activate ? "FuncionÃ¡rio ativado." : "FuncionÃ¡rio desativado.");
+    toast(activate ? "Funcionário ativado." : "Funcionário desativado.");
   });
 };
 
@@ -426,18 +432,18 @@ async function loadManager() {
     const counts = data.report.reduce((a, r) => (a[r.state] = (a[r.state] || 0) + 1, a), {});
     $("#managerStats").innerHTML = [
       ["Dias analisados", data.report.length],
-      ["PendÃªncias", (counts.SEM_REGISTROS || 0) + (counts.INCOMPLETO || 0)],
+      ["Pendências", (counts.SEM_REGISTROS || 0) + (counts.INCOMPLETO || 0)],
       ["Com hora extra", counts.HORA_EXTRA || 0],
       ["Regulares", counts.REGULAR || 0]
     ].map(([name, value]) => `<div class="stat"><span>${name}</span><strong>${value}</strong></div>`).join("");
     $("#reportBody").innerHTML = data.report.map(r => `<tr>
       <td><strong>${r.name}</strong><small>${r.registration}</small></td><td>${localDate(r.date)}</td>
-      <td>${r.times.length ? r.times.join(" Â· ") : "â€”"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td><td>${minutes(r.worked_minutes)}</td>
+      <td>${r.times.length ? r.times.join(" · ") : "—"}${r.times.length ? locationSummary(r.locations) + geofenceSummary(r.locations) : ""}</td><td>${minutes(r.worked_minutes)}</td>
       <td><span class="status state-${r.state}">${states[r.state]}</span>${r.overtime_minutes ? `<small>+${minutes(r.overtime_minutes)}</small>` : ""}</td>
-      <td><small>${h(r.overtime_reason || "")}${r.overtime_status ? `<br><b>${overtimeStatus[r.overtime_status] || ""}</b>` : ""}${r.overtime_treatment ? ` Â· ${overtimeTreatment[r.overtime_treatment] || ""}` : ""}${r.overtime_review_note ? `<br>${h(r.overtime_review_note)}` : ""}${r.day_note ? `<br>${h(r.day_note)}` : ""}</small></td>
-      <td>${r.overtime_minutes ? (r.overtime_reason ? `<button class="text-button" onclick="reviewOvertime(${r.user_id},'${r.date}')">Analisar justificativa</button>` : `<small>Aguardando justificativa</small>`) : ""}<button class="text-button" onclick="dayNote(${r.user_id},'${r.date}')">OcorrÃªncia</button><button class="text-button" onclick="managerCorrection(${r.user_id},'${r.date}')">Corrigir</button></td>
+      <td><small>${h(r.overtime_reason || "")}${r.overtime_status ? `<br><b>${overtimeStatus[r.overtime_status] || ""}</b>` : ""}${r.overtime_treatment ? ` · ${overtimeTreatment[r.overtime_treatment] || ""}` : ""}${r.overtime_review_note ? `<br>${h(r.overtime_review_note)}` : ""}${r.day_note ? `<br>${h(r.day_note)}` : ""}</small></td>
+      <td>${r.overtime_minutes ? (r.overtime_reason ? `<button class="text-button" onclick="reviewOvertime(${r.user_id},'${r.date}')">Analisar justificativa</button>` : `<small>Aguardando justificativa</small>`) : ""}<button class="text-button" onclick="dayNote(${r.user_id},'${r.date}')">Ocorrência</button><button class="text-button" onclick="managerCorrection(${r.user_id},'${r.date}')">Corrigir</button></td>
     </tr>`).join("");
-    $("#correctionsBody").innerHTML = data.corrections.map(c => `<tr><td>${c.name}<small>${c.registration}</small></td><td>${c.action} Â· ${c.requested_at_value ? new Date(c.requested_at_value).toLocaleString("pt-BR") : ""}</td><td>${c.reason}</td><td><span class="status state-${c.status}">${c.status}</span></td><td>${c.status === "PENDING" ? `<button class="text-button" onclick="reviewCorrection(${c.id},'APPROVED')">Aprovar</button><button class="text-button danger-text" onclick="reviewCorrection(${c.id},'REJECTED')">Rejeitar</button>` : "â€”"}</td></tr>`).join("");
+    $("#correctionsBody").innerHTML = data.corrections.map(c => `<tr><td>${c.name}<small>${c.registration}</small></td><td>${c.action} · ${c.requested_at_value ? new Date(c.requested_at_value).toLocaleString("pt-BR") : ""}</td><td>${c.reason}</td><td><span class="status state-${c.status}">${c.status}</span></td><td>${c.status === "PENDING" ? `<button class="text-button" onclick="reviewCorrection(${c.id},'APPROVED')">Aprovar</button><button class="text-button danger-text" onclick="reviewCorrection(${c.id},'REJECTED')">Rejeitar</button>` : "—"}</td></tr>`).join("");
   } catch (error) { toast(error.message, true); }
 }
 
@@ -462,7 +468,7 @@ $("#backupButton").addEventListener("click", () => { window.location.href = "/ap
 $("#restoreButton").addEventListener("click", () => {
   const file = $("#restoreFile").files[0];
   if (!file) return toast("Selecione um arquivo de backup.", true);
-  confirmModal("Restaurar banco de dados", "Os dados atuais serÃ£o substituÃ­dos pelos dados do backup e todas as sessÃµes serÃ£o encerradas.", async () => {
+  confirmModal("Restaurar banco de dados", "Os dados atuais serão substituídos pelos dados do backup e todas as sessões serão encerradas.", async () => {
     if (file.size > 50 * 1024 * 1024) throw new Error("O backup excede o limite de 50 MB.");
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = "";
@@ -482,24 +488,24 @@ $("#restoreButton").addEventListener("click", () => {
 $("#filterButton").addEventListener("click", loadManager);
 $("#exportButton").addEventListener("click", () => { window.location.href = `/api/manager/export?${managerQuery()}`; });
 
-window.reviewCorrection = (id, status) => confirmModal(status === "APPROVED" ? "Aprovar correÃ§Ã£o" : "Rejeitar correÃ§Ã£o", `<label>ObservaÃ§Ã£o<textarea id="reviewNote" placeholder="Opcional"></textarea></label>`, async () => {
+window.reviewCorrection = (id, status) => confirmModal(status === "APPROVED" ? "Aprovar correção" : "Rejeitar correção", `<label>Observação<textarea id="reviewNote" placeholder="Opcional"></textarea></label>`, async () => {
   await api(`/api/manager/corrections/${id}`, { method: "POST", body: JSON.stringify({ status, note: $("#reviewNote").value }) });
-  toast("SolicitaÃ§Ã£o analisada."); await loadManager();
+  toast("Solicitação analisada."); await loadManager();
 }, true);
 
-window.dayNote = (userId, workDate) => confirmModal("Registrar ocorrÃªncia", `<div class="form-stack"><label>Categoria<select id="noteCategory"><option>FERIADO</option><option>FOLGA</option><option>FALTA_JUSTIFICADA</option><option>ATESTADO</option><option>OUTRO</option></select></label><label>ObservaÃ§Ã£o<textarea id="noteText" required></textarea></label></div>`, async () => {
+window.dayNote = (userId, workDate) => confirmModal("Registrar ocorrência", `<div class="form-stack"><label>Categoria<select id="noteCategory"><option>FERIADO</option><option>FOLGA</option><option>FALTA_JUSTIFICADA</option><option>ATESTADO</option><option>OUTRO</option></select></label><label>Observação<textarea id="noteText" required></textarea></label></div>`, async () => {
   await api("/api/manager/day-note", { method: "POST", body: JSON.stringify({ user_id: userId, work_date: workDate, category: $("#noteCategory").value, note: $("#noteText").value }) });
-  toast("OcorrÃªncia registrada."); await loadManager();
+  toast("Ocorrência registrada."); await loadManager();
 }, true);
 
-window.reviewOvertime = (userId, workDate) => confirmModal("Analisar justificativa", `<div class="form-stack"><p class="legal-note">Esta anÃ¡lise nÃ£o altera nem remove as horas efetivamente apuradas.</p><label>AnÃ¡lise do motivo<select id="overtimeReviewStatus"><option value="APPROVED">Justificativa validada</option><option value="REJECTED">Justificativa contestada</option></select></label><label>Tratamento administrativo<select id="overtimeTreatment"><option value="PAYMENT">Pagamento</option><option value="TIME_BANK">Banco de horas</option><option value="HR_REVIEW">Encaminhado ao RH</option></select></label><label>ObservaÃ§Ã£o<textarea id="overtimeReviewNote" placeholder="Explique a decisÃ£o administrativa"></textarea></label></div>`, async () => {
+window.reviewOvertime = (userId, workDate) => confirmModal("Analisar justificativa", `<div class="form-stack"><p class="legal-note">Esta análise não altera nem remove as horas efetivamente apuradas.</p><label>Análise do motivo<select id="overtimeReviewStatus"><option value="APPROVED">Justificativa validada</option><option value="REJECTED">Justificativa contestada</option></select></label><label>Tratamento administrativo<select id="overtimeTreatment"><option value="PAYMENT">Pagamento</option><option value="TIME_BANK">Banco de horas</option><option value="HR_REVIEW">Encaminhado ao RH</option></select></label><label>Observação<textarea id="overtimeReviewNote" placeholder="Explique a decisão administrativa"></textarea></label></div>`, async () => {
   await api("/api/manager/overtime-review", { method: "POST", body: JSON.stringify({ user_id: userId, work_date: workDate, status: $("#overtimeReviewStatus").value, treatment: $("#overtimeTreatment").value, note: $("#overtimeReviewNote").value }) });
-  toast("AnÃ¡lise registrada sem alterar as horas apuradas."); await loadManager();
+  toast("Análise registrada sem alterar as horas apuradas."); await loadManager();
 }, true);
 
-window.managerCorrection = (userId, workDate) => confirmModal("Adicionar marcaÃ§Ã£o corrigida", `<div class="form-stack"><label>Data e hora<input id="managerCorrectionDate" type="datetime-local" value="${workDate}T08:00"></label><label>Tipo<select id="managerCorrectionType">${Object.entries(labels).map(([v,l]) => `<option value="${v}">${l}</option>`).join("")}</select></label><label>Motivo<textarea id="managerCorrectionReason" required minlength="5"></textarea></label></div>`, async () => {
-  await api("/api/corrections", { method: "POST", body: JSON.stringify({ user_id: userId, action: "ADD", requested_at_value: new Date($("#managerCorrectionDate").value).toISOString(), requested_type: $("#managerCorrectionType").value, reason: $("#managerCorrectionReason").value }) });
-  toast("CorreÃ§Ã£o registrada com auditoria."); await loadManager();
+window.managerCorrection = (userId, workDate) => confirmModal("Adicionar marcação corrigida", `<div class="form-stack"><label>Data e hora<input id="managerCorrectionDate" type="datetime-local" value="${workDate}T08:00"></label><label>Tipo<select id="managerCorrectionType">${Object.entries(labels).map(([v,l]) => `<option value="${v}">${l}</option>`).join("")}</select></label><label>Motivo<textarea id="managerCorrectionReason" required minlength="5"></textarea></label></div>`, async () => {
+  await api("/api/corrections", { method: "POST", body: JSON.stringify({ user_id: userId, action: "ADD", requested_at_value: localInputToSaoPauloIso($("#managerCorrectionDate").value), requested_type: $("#managerCorrectionType").value, reason: $("#managerCorrectionReason").value }) });
+  toast("Correção registrada com auditoria."); await loadManager();
 }, true);
 
 function confirmModal(title, content, onConfirm, html = false) {

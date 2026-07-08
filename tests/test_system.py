@@ -223,6 +223,36 @@ class SystemTest(unittest.TestCase):
         self.assertEqual(lunch["punch_type"], "SAIDA_ALMOCO")
         self.assertEqual(lunch["geofence"]["status"], "INACTIVE_FOR_PUNCH")
 
+    def test_70_approved_correction_uses_sao_paulo_time_in_report(self):
+        manager = self.login("admin", "Admin@123")
+        user, _ = self.create_employee(manager, "correcao-fuso")
+        work_date = server.now_local().date().isoformat()
+        stamp = server.now_local().isoformat()
+        with server.db() as con:
+            con.execute(
+                """INSERT INTO corrections(
+                   user_id,action,requested_at_value,requested_type,reason,status,
+                   requested_by,reviewed_by,requested_at,reviewed_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    user["id"],
+                    "ADD",
+                    f"{work_date}T20:06:00+00:00",
+                    "ENTRADA",
+                    "Esqueci",
+                    "APPROVED",
+                    user["id"],
+                    1,
+                    stamp,
+                    stamp,
+                ),
+            )
+        report = self.request(
+            manager,
+            f"/api/manager/report?from={work_date}&to={work_date}&user_id={user['id']}",
+        )
+        self.assertEqual(report["report"][0]["times"], ["17:06:00"])
+
     def test_90_backup_and_restore(self):
         manager = self.login("admin", "Admin@123")
         backup = manager.open(self.base + "/api/manager/backup").read()

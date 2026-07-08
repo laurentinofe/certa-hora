@@ -275,6 +275,17 @@ def parse_iso(value):
     return datetime.fromisoformat(value)
 
 
+def as_app_time(value):
+    parsed = parse_iso(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=APP_TIMEZONE)
+    return parsed.astimezone(APP_TIMEZONE)
+
+
+def app_time_iso(value):
+    return as_app_time(value).isoformat()
+
+
 def haversine_meters(lat1, lon1, lat2, lon2):
     radius = 6_371_000
     phi1 = math.radians(lat1)
@@ -352,6 +363,8 @@ def effective_punches(con, user_id, date_from=None, date_to=None):
             params,
         )
     )
+    for punch in originals:
+        punch["punched_at"] = app_time_iso(punch["punched_at"])
     approved = rows_as_dict(
         con.execute(
             """SELECT c.*, u.name, u.registration
@@ -369,13 +382,13 @@ def effective_punches(con, user_id, date_from=None, date_to=None):
             result.remove(target)
         elif correction["action"] == "EDIT" and target in result:
             replacement = dict(target)
-            replacement["punched_at"] = correction["requested_at_value"]
+            replacement["punched_at"] = app_time_iso(correction["requested_at_value"])
             replacement["punch_type"] = correction["requested_type"] or target["punch_type"]
             replacement["corrected"] = True
             replacement["correction_id"] = correction["id"]
             result[result.index(target)] = replacement
         elif correction["action"] == "ADD":
-            value = correction["requested_at_value"]
+            value = app_time_iso(correction["requested_at_value"])
             if value and (not date_from or value[:10] >= date_from) and (not date_to or value[:10] <= date_to):
                 result.append(
                     {
@@ -1568,7 +1581,7 @@ def build_report(con, employees, date_from, date_to):
                         "name": employee["name"],
                         "registration": employee["registration"],
                         "date": key,
-                        "times": [parse_iso(p["punched_at"]).strftime("%H:%M:%S") for p in items],
+                        "times": [as_app_time(p["punched_at"]).strftime("%H:%M:%S") for p in items],
                         "locations": [
                             {
                                 "status": p.get("location_status", "NOT_COLLECTED"),
