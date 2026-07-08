@@ -347,20 +347,12 @@ def location_export_text(location):
 
 
 def effective_punches(con, user_id, date_from=None, date_to=None):
-    params = [user_id]
-    where = ["p.user_id=?"]
-    if date_from:
-        where.append("date(p.punched_at)>=?")
-        params.append(date_from)
-    if date_to:
-        where.append("date(p.punched_at)<=?")
-        params.append(date_to)
     originals = rows_as_dict(
         con.execute(
             f"""SELECT p.*, u.name, u.registration
                 FROM punches p JOIN users u ON u.id=p.user_id
-                WHERE {' AND '.join(where)} ORDER BY p.punched_at""",
-            params,
+                WHERE p.user_id=? ORDER BY p.punched_at""",
+            (user_id,),
         )
     )
     for punch in originals:
@@ -403,7 +395,13 @@ def effective_punches(con, user_id, date_from=None, date_to=None):
                         "correction_id": correction["id"],
                     }
                 )
-    return sorted(result, key=lambda item: item["punched_at"])
+    filtered = [
+        item
+        for item in result
+        if (not date_from or item["punched_at"][:10] >= date_from)
+        and (not date_to or item["punched_at"][:10] <= date_to)
+    ]
+    return sorted(filtered, key=lambda item: item["punched_at"])
 
 
 def day_summary(punches, settings=None):

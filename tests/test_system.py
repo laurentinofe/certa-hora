@@ -272,6 +272,30 @@ class SystemTest(unittest.TestCase):
         ):
             self.assertIn(header, sheet)
 
+    def test_85_employee_history_uses_local_date_for_late_punches(self):
+        manager = self.login("admin", "Admin@123")
+        user, registration = self.create_employee(manager, "historico-local")
+        work_date = server.now_local().date().isoformat()
+        stamp = server.now_local().isoformat()
+        with server.db() as con:
+            con.executemany(
+                """INSERT INTO punches(user_id,punched_at,punch_type,created_at)
+                   VALUES(?,?,?,?)""",
+                [
+                    (user["id"], f"{work_date}T08:00:00-03:00", "ENTRADA", stamp),
+                    (user["id"], f"{work_date}T12:00:00-03:00", "SAIDA_ALMOCO", stamp),
+                    (user["id"], f"{work_date}T13:26:00-03:00", "RETORNO_ALMOCO", stamp),
+                    (user["id"], f"{work_date}T23:37:00-03:00", "SAIDA", stamp),
+                ],
+            )
+        employee = self.login(registration, "Teste@123")
+        history = self.request(employee, f"/api/employee/history?month={work_date[:7]}")
+        row = next(item for item in history["history"] if item["date"] == work_date)
+        self.assertEqual(
+            row["times"],
+            ["08:00:00", "12:00:00", "13:26:00", "23:37:00"],
+        )
+
     def test_90_backup_and_restore(self):
         manager = self.login("admin", "Admin@123")
         backup = manager.open(self.base + "/api/manager/backup").read()
