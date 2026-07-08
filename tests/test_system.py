@@ -10,7 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
 
 
@@ -252,6 +254,23 @@ class SystemTest(unittest.TestCase):
             f"/api/manager/report?from={work_date}&to={work_date}&user_id={user['id']}",
         )
         self.assertEqual(report["report"][0]["times"], ["17:06:00"])
+
+    def test_80_export_splits_punch_times_into_columns(self):
+        manager = self.login("admin", "Admin@123")
+        work_date = server.now_local().date().isoformat()
+        xlsx = manager.open(
+            f"{self.base}/api/manager/export?from={work_date}&to={work_date}"
+        ).read()
+        with zipfile.ZipFile(BytesIO(xlsx)) as workbook:
+            sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        for header in (
+            "Entrada",
+            "Saída almoço",
+            "Retorno almoço",
+            "Saída",
+            "Marcações extras",
+        ):
+            self.assertIn(header, sheet)
 
     def test_90_backup_and_restore(self):
         manager = self.login("admin", "Admin@123")

@@ -793,16 +793,37 @@ class Handler(BaseHTTPRequestHandler):
                     sql += " AND id=?"
                     params.append(selected)
                 report = build_report(con, rows_as_dict(con.execute(sql, params)), date_from, date_to)
-            headers = ["Funcionário", "Matrícula", "Data", "Marcações", "Localizações", "Minutos trabalhados", "Hora extra", "Situação", "Justificativa", "Ocorrência"]
+            headers = [
+                "Funcionário",
+                "Matrícula",
+                "Data",
+                "Entrada",
+                "Saída almoço",
+                "Retorno almoço",
+                "Saída",
+                "Marcações extras",
+                "Localizações",
+                "Minutos trabalhados",
+                "Hora extra",
+                "Situação",
+                "Justificativa",
+                "Ocorrência",
+            ]
             data = [[
-                r["name"], r["registration"], r["date"], " | ".join(r["times"]),
-                " | ".join(
-                    f'{location["latitude"]:.6f},{location["longitude"]:.6f} (±{location["accuracy"]:.0f}m)'
-                    if location["status"] == "CAPTURED" else location["status"]
-                    for location in r["locations"]
-                ),
-                r["worked_minutes"], r["overtime_minutes"], r["state"],
-                r.get("overtime_reason", ""), r.get("day_note", "")
+                r["name"],
+                r["registration"],
+                r["date"],
+                r["times"][0] if len(r["times"]) > 0 else "",
+                r["times"][1] if len(r["times"]) > 1 else "",
+                r["times"][2] if len(r["times"]) > 2 else "",
+                r["times"][3] if len(r["times"]) > 3 else "",
+                " | ".join(r["times"][4:]),
+                " | ".join(location_export_text(location) for location in r["locations"]),
+                r["worked_minutes"],
+                r["overtime_minutes"],
+                r["state"],
+                r.get("overtime_reason", ""),
+                r.get("day_note", ""),
             ] for r in report]
             content = xlsx_bytes(headers, data)
             self.send_response(200)
